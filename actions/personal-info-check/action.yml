@@ -11,7 +11,7 @@ inputs:
   personal-info-lists-repo:
     description: "Repository containing personal info reference lists"
     required: false
-    default: "AmsterdamUMC-test/org-security-workflows"
+    default: "amsterdamumc/org-security-workflows"
   personal-info-lists-ref:
     description: "Branch or tag of the reference lists repository"
     required: false
