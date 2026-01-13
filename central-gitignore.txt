@@ -94,19 +94,6 @@
 *.pfx
 *.crt
 
-# --- XML (blocked by default, with exceptions) ---
-*.xml
-!pom.xml
-!web.xml
-!app.config
-!packages.config
-!*.csproj
-!*.vbproj
-!*.vcxproj
-!*.fsproj
-!*.props
-!*.targets
-
 # END FORBIDDEN
 
 
