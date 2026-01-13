@@ -94,20 +94,6 @@
 *.pfx
 *.crt
 
-# --- JSON (blocked by default, with exceptions) ---
-*.json
-!package.json
-!package-lock.json
-!tsconfig.json
-!jsconfig.json
-!composer.json
-!config.example.json
-!.prettierrc.json
-!.eslintrc.json
-!metadata.json
-!schema.json
-!manifest.json
-
 # --- XML (blocked by default, with exceptions) ---
 *.xml
 !pom.xml
