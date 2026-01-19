@@ -36,25 +36,3 @@ regexes = [
     '''example\.com''',
     '''onmicrosoft\.com.*sample\d+''',
 ]
-
-# Paths that should NEVER be ignored (extra vigilance)
-# [allowlist.paths]
-# This section would be for stoplist, but gitleaks doesn't support it directly
-# Instead, rely on manual review of these patterns
-
-# Custom rules for Amsterdam UMC specific patterns (optional)
-# [[rules]]
-# id = "amc-patient-id"
-# description = "Potential Amsterdam UMC Patient ID"
-# regex = '''(?i)patient[_-]?id["']?\s*[:=]\s*["'][A-Z0-9]{8,}["']'''
-# This would be too many false positives - better to use PII scanner for this
-```
-
-## How to use it:
-
-**1. Add to your org-security-workflows repo:**
-```
-org-security-workflows/
-├── .gitleaks.toml
-├── central-gitignore.txt
-└── ...
