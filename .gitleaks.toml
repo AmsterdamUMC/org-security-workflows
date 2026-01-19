@@ -1,0 +1,60 @@
+title = "Amsterdam UMC Gitleaks Configuration"
+
+# Keep all default gitleaks rules, but add custom allowlists
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Medical research environment allowlist"
+
+# Ignore entire file types that cause false positives
+paths = [
+    '''.*\.ipynb$''',           # Jupyter notebooks (scientific data)
+    '''.*\.log$''',              # Log files (pagination tokens, etc.)
+    '''.*test.*\.json$''',       # Test configuration files
+]
+
+# Context-aware patterns - only ignore when variable name indicates it's safe
+regexes = [
+    # Google AdSense Publisher IDs (public identifiers)
+    '''ca-pub-\d{16}''',
+    
+    # Azure public identifiers (only when explicitly named)
+    '''(?i)(clientid|applicationid|appid)["']?\s*[:=]\s*["'][a-f0-9-]{36}["']''',
+    '''(?i)(tenantid|directoryid)["']?\s*[:=]\s*["'][a-f0-9-]{36}["']''',
+    '''(?i)(thumbprint|certificatethumbprint)["']?\s*[:=]\s*["'][A-F0-9]{40}["']''',
+    
+    # DNA/RNA sequences (4+ repeated nucleotides)
+    '''[ACGT]{8,}''',
+    
+    # Microsoft Graph pagination tokens (in URLs only)
+    '''skiptoken=[A-Za-z0-9%+/=_-]+''',
+    
+    # Generic sample/placeholder values
+    '''sample\d+secret''',
+    '''aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee''',
+    '''example\.com''',
+    '''onmicrosoft\.com.*sample\d+''',
+]
+
+# Paths that should NEVER be ignored (extra vigilance)
+# [allowlist.paths]
+# This section would be for stoplist, but gitleaks doesn't support it directly
+# Instead, rely on manual review of these patterns
+
+# Custom rules for Amsterdam UMC specific patterns (optional)
+# [[rules]]
+# id = "amc-patient-id"
+# description = "Potential Amsterdam UMC Patient ID"
+# regex = '''(?i)patient[_-]?id["']?\s*[:=]\s*["'][A-Z0-9]{8,}["']'''
+# This would be too many false positives - better to use PII scanner for this
+```
+
+## How to use it:
+
+**1. Add to your org-security-workflows repo:**
+```
+org-security-workflows/
+├── .gitleaks.toml
+├── central-gitignore.txt
+└── ...
