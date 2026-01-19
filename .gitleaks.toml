@@ -26,13 +26,4 @@ regexes = [
     
     # DNA/RNA sequences (4+ repeated nucleotides)
     '''[ACGT]{8,}''',
-    
-    # Microsoft Graph pagination tokens (in URLs only)
-    '''skiptoken=[A-Za-z0-9%+/=_-]+''',
-    
-    # Generic sample/placeholder values
-    '''sample\d+secret''',
-    '''aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee''',
-    '''example\.com''',
-    '''onmicrosoft\.com.*sample\d+''',
 ]
