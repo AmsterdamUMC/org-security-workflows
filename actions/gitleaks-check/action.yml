@@ -1,0 +1,172 @@
+name: "Gitleaks Secrets Check"
+description: "Scans for secrets, API keys, passwords, and credentials in repository files"
+inputs:
+  telemetry-pat:
+    description: "PAT token for sending telemetry"
+    required: false
+  telemetry-repo:
+    description: "Repository to send telemetry to (format: owner/repo)"
+    required: false
+    default: "AmsterdamUMC-test/security-telemetry"
+  gitleaks-config-url:
+    description: "URL to central gitleaks.toml configuration"
+    required: false
+    default: "https://raw.githubusercontent.com/AmsterdamUMC-test/org-security-workflows/main/.gitleaks.toml"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Download central gitleaks config to safe location
+      shell: bash
+      env:
+        CONFIG_URL: ${{ inputs.gitleaks-config-url }}
+      run: |
+        # Download to /tmp (outside repository) to prevent tampering
+        # SECURITY: Never use .gitleaks.toml from the repo being scanned (code injection risk)
+        curl -sL "$CONFIG_URL" -o /tmp/gitleaks.toml
+
+        echo "Downloaded gitleaks configuration from: $CONFIG_URL"
+        echo "Saved to: /tmp/gitleaks.toml"
+        echo ""
+        echo "Configuration preview:"
+        head -20 /tmp/gitleaks.toml
+
+    - name: Run Gitleaks scan
+      shell: bash
+      id: scan
+      run: |
+        echo "🔐 Scanning repository for secrets..."
+
+        # Run gitleaks with config from safe location
+        # DO NOT use config from repository being scanned (code injection risk)
+        docker run --rm \
+          -v "$PWD:/scan:ro" \
+          -v "/tmp/gitleaks.toml:/gitleaks.toml:ro" \
+          zricethezav/gitleaks:latest \
+          detect \
+          --source /scan \
+          --config /gitleaks.toml \
+          --report-path /scan/gitleaks-report.json \
+          --report-format json \
+          --verbose \
+          --exit-code 0 || true
+
+        # Check if report was created and parse results
+        if [ -f gitleaks-report.json ]; then
+          SECRETS_COUNT=$(jq '. | length' gitleaks-report.json)
+          echo "secrets_found=${SECRETS_COUNT}" >> $GITHUB_OUTPUT
+          
+          if [ "$SECRETS_COUNT" -gt 0 ]; then
+            echo "status=fail" >> $GITHUB_OUTPUT
+            echo "message=secrets_detected" >> $GITHUB_OUTPUT
+            
+            echo ""
+            echo "⚠️  Found $SECRETS_COUNT potential secret(s)"
+            
+            # Extract first 10 findings for telemetry and display
+            jq -c '[.[] | {
+              file: .File,
+              line: .StartLine,
+              rule: .RuleID,
+              description: .Description,
+              match: .Match
+            }] | .[0:10]' gitleaks-report.json > secrets_summary.json
+            
+            echo ""
+            echo "Summary of findings:"
+            jq -r '.[] | "  - \(.file):\(.line) [\(.rule)] \(.description)"' secrets_summary.json
+          else
+            echo "status=ok" >> $GITHUB_OUTPUT
+            echo "message=no_secrets" >> $GITHUB_OUTPUT
+            echo "secrets_found=0" >> $GITHUB_OUTPUT
+            echo "✅ No secrets detected"
+          fi
+        else
+          echo "status=ok" >> $GITHUB_OUTPUT
+          echo "message=no_secrets" >> $GITHUB_OUTPUT
+          echo "secrets_found=0" >> $GITHUB_OUTPUT
+          echo "✅ No secrets detected (no report generated)"
+        fi
+
+    - name: Upload gitleaks report as artifact
+      if: always() && steps.scan.outputs.secrets_found != '0'
+      uses: actions/upload-artifact@v4
+      with:
+        name: gitleaks-report
+        path: gitleaks-report.json
+        retention-days: 90
+
+    - name: Save results for telemetry
+      if: always()
+      shell: bash
+      run: |
+        # Save for next step
+        echo "${{ steps.scan.outputs.secrets_found }}" > secrets_count.txt
+        if [ -f secrets_summary.json ]; then
+          cp secrets_summary.json secrets_for_telemetry.json
+        else
+          echo "[]" > secrets_for_telemetry.json
+        fi
+
+    - name: Send telemetry via repository dispatch
+      if: always() && inputs.telemetry-pat != '' && inputs.telemetry-repo != '' && steps.scan.outputs.status == 'fail'
+      uses: actions/github-script@v7
+      env:
+        STATUS: ${{ steps.scan.outputs.status }}
+        MESSAGE: ${{ steps.scan.outputs.message }}
+        SECRETS_COUNT: ${{ steps.scan.outputs.secrets_found }}
+        TELEMETRY_REPO: ${{ inputs.telemetry-repo }}
+      with:
+        github-token: ${{ inputs.telemetry-pat }}
+        script: |
+          const fs = require('fs');
+
+          // Read secrets summary
+          let secretsList = [];
+          try {
+            const content = fs.readFileSync('secrets_for_telemetry.json', 'utf8');
+            secretsList = JSON.parse(content);
+          } catch (e) {
+            console.log('No secrets summary file found');
+          }
+
+          const [owner, repo] = process.env.TELEMETRY_REPO.split('/');
+
+          await github.rest.repos.createDispatchEvent({
+            owner: owner,
+            repo: repo,
+            event_type: 'secrets_violation',
+            client_payload: {
+              repository: process.env.GITHUB_REPOSITORY,
+              run_id: process.env.GITHUB_RUN_ID,
+              sha: process.env.GITHUB_SHA,
+              ref: process.env.GITHUB_REF,
+              actor: process.env.GITHUB_ACTOR,
+              secrets_count: parseInt(process.env.SECRETS_COUNT),
+              secrets_list: secretsList,
+              timestamp: new Date().toISOString()
+            }
+          });
+
+          console.log('Telemetry sent to ' + process.env.TELEMETRY_REPO);
+
+    - name: No telemetry configured
+      if: inputs.telemetry-pat == ''
+      shell: bash
+      run: |
+        echo "No telemetry-pat configured; skipping telemetry."
+
+    - name: Fail if secrets detected
+      if: steps.scan.outputs.status == 'fail'
+      shell: bash
+      run: |
+        echo ""
+        echo "=========================================="
+        echo "ERROR: Secrets detected in repository!"
+        echo "=========================================="
+        echo "Found ${{ steps.scan.outputs.secrets_found }} potential secret(s)."
+        echo ""
+        echo "These must be removed and rotated immediately."
+        echo "See: https://github.com/AmsterdamUMC-test/org-security-workflows#secrets-remediation"
+        echo ""
+        exit 1
