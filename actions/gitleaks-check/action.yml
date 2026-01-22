@@ -11,7 +11,7 @@ inputs:
   gitleaks-config-url:
     description: "URL to central gitleaks.toml configuration"
     required: false
-    default: "https://raw.githubusercontent.com/AmsterdamUMC-test/org-security-workflows/main/.gitleaks.toml"
+    default: "https://raw.githubusercontent.com/AmsterdamUMC/org-security-workflows/main/.gitleaks.toml"
 
 runs:
   using: "composite"
