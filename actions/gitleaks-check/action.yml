@@ -11,7 +11,7 @@ inputs:
   gitleaks-config-url:
     description: "URL to central gitleaks.toml configuration"
     required: false
-    default: "https://raw.githubusercontent.com/AmsterdamUMC/org-security-workflows/main/gitleaks.toml"
+    default: "https://raw.githubusercontent.com/amsterdamumc/org-security-workflows/main/gitleaks.toml"
 
 runs:
   using: "composite"
@@ -40,7 +40,7 @@ runs:
         # Run gitleaks with config from safe location
         # DO NOT use config from repository being scanned (code injection risk)
         docker run --rm \
-          -v "$PWD:/scan:ro" \
+          -v "$PWD:/scan" \
           -v "/tmp/gitleaks.toml:/gitleaks.toml:ro" \
           zricethezav/gitleaks:latest \
           detect \
