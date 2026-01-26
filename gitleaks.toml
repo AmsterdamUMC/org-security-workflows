@@ -12,6 +12,9 @@ paths = [
     '''.*\.ipynb$''',           # Jupyter notebooks (scientific data)
     '''.*\.log$''',              # Log files (pagination tokens, etc.)
     '''.*test.*\.json$''',       # Test configuration files
+    '''SECURITY\.md$''',         # Security documentation (contains example secrets)
+    '''CONTRIBUTING\.md$''',     # Contributing guide (may have example tokens)
+    '''README.*\.md$''',         # README files (often have example credentials)
 ]
 
 # Context-aware patterns - only ignore when variable name indicates it's safe
