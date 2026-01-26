@@ -158,7 +158,7 @@ runs:
           await github.rest.repos.createDispatchEvent({
             owner: owner,
             repo: repo,
-            event_type: 'security_alert',
+            event_type: 'filetype_violation',
             client_payload: {
               repository: process.env.GITHUB_REPOSITORY,
               run_id: process.env.GITHUB_RUN_ID,
