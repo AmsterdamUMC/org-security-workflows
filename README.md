@@ -1,70 +1,232 @@
-# GitHub Research Security Workflows
+# Organization Security Workflows
 
-This repository provides reusable GitHub workflows and pre-commit hooks designed to help research teams prevent accidental data leaks, enforce version control standards, and comply with institutional security guidelines.
+Central repository for GitHub security infrastructure at Amsterdam UMC. Provides reusable workflows, pre-commit hooks, and shared configuration for preventing accidental data leaks in research repositories.
 
-It is part of a broader effort to support researchers in securely managing software and data when working with GitHub.
+This repository is the **single source of truth** for security rules enforced across the organization.
 
-## Contents
+## Repository Structure
 
-### Reusable GitHub Workflow
+```
+org-security-workflows/
+├── .github/
+│   └── workflows/
+│       ├── check-forbidden-filetypes.yml    # Reusable workflow for filetype scanning
+│       ├── check-gitleaks.yml               # Reusable workflow for secrets detection
+│       └── check-personal-info.yml          # Reusable workflow for PII scanning
+├── actions/
+│   ├── filetype-check/
+│   │   └── action.yml                       # Composite action for filetype detection
+│   ├── gitleaks-check/
+│   │   └── action.yml                       # Composite action for secrets detection
+│   └── personal-info-check/
+│       └── action.yml                       # Composite action for PII detection
+├── pre-commit-check/
+│   ├── check-filetypes.sh                   # Pre-commit hook for filetypes
+│   └── check-personal-info.sh               # Pre-commit hook for PII
+├── pre-push-check/
+│   ├── check-filetypes-prepush.sh           # Pre-push hook for filetypes
+│   └── check-personal-info-prepush.sh       # Pre-push hook for PII
+├── personal-info-lists/
+│   ├── common-dutch-firstnames.txt          # Dutch first name database
+│   ├── common-dutch-surnames.txt            # Dutch surname database
+│   └── common-dutch-streetnames.txt         # Dutch street name database
+├── central-gitignore.txt                    # Forbidden file patterns
+├── gitleaks.toml                            # Secrets detection rules
+├── .pre-commit-hooks.yaml                   # Hook definitions for pre-commit framework
+├── LICENSE
+└── README.md
+```
 
-- `.github/workflows/check-forbidden-filetypes.yml`  
-  A reusable workflow that fails if forbidden file types are committed. It uses the composite github action `filetype-check/` as suggested by GitHub security guidelines. It can be called from other workflows in the organization. For usage see below.
+## Security Architecture
 
-### Composite GitHub Action
+This repository provides security checks that run at multiple layers:
 
-- `filetype-check/`  
-  A composite GitHub Action that scans the Git index for forbidden file extensions. It reads from a shared `forbidden-extensions.txt` file. Used by check-forbidden-filetypes workflow
+| Layer | Location | Trigger | Can Be Bypassed? |
+|-------|----------|---------|------------------|
+| Pre-commit hooks | Developer machine | `git commit` | Yes (`--no-verify`) |
+| Pre-push hooks | Developer machine | `git push` | Yes (`--no-verify`) |
+| GitHub Actions | GitHub servers | Push, PR | No |
 
-### Pre-commit Hook
+The hooks and workflows reference centralized configuration files in this repository, ensuring consistent rules across all Amsterdam UMC projects.
 
-- `pre-commit-check/check-filetypes.sh`  
-  A shell-based pre-commit hook to block commits that include forbidden file types. Also uses the shared extension list.
+```
+Developer Machine                              GitHub
+──────────────────────────────────────────────────────────────
 
-### Pre-push Hook
+git add ──> .gitignore ──> blocked silently
 
-- `pre-push-check/check-filetypes-prepush.sh`  
-  A shell-based pre-commit hook to block commits that include forbidden file types. Also uses the shared extension list.
+git commit ──> pre-commit hooks ──> blocked with message
+               (filetypes, PII)
 
+git push ──> pre-push hooks ──> blocked with message
+             (filetypes, PII)
 
-### Shared Extension List
+                    │
+                    │ (if local checks pass or are bypassed)
+                    ▼
 
-- `central-gitignore.txt`  
-  A centralized list of sensitive file extensions (e.g. `.csv`, `.json`, `.nii.gz`) used by both the action, the pre-commit, and the pre-push hook.
+              GitHub Actions ──> blocked, PR fails, alert sent
+              (filetypes, PII, secrets)
+```
+
+## Security Checks
+
+The system performs three primary security checks:
+
+| Check | What It Detects | Hook | Workflow |
+|-------|-----------------|------|----------|
+| Forbidden filetypes | Data files, medical imaging, databases | Yes | Yes |
+| Personal information | Dutch names, addresses, patient IDs | Yes | Yes |
+| Secrets | API keys, tokens, passwords, private keys | No | Yes |
+
+Secrets detection runs only as a GitHub Action (not in local hooks) because gitleaks requires additional tooling that may not be available on all developer machines.
+
+## Forbidden File Types
+
+### The Central Gitignore
+
+The `central-gitignore.txt` file defines which file types are blocked:
+
+```gitignore
+# BEGIN FORBIDDEN
+*.csv
+*.xlsx
+*.json
+!package.json         # Exception: allowed
+!package-lock.json    # Exception: allowed
+# END FORBIDDEN
+
+# Everything below is convenience-only (not enforced)
+.DS_Store
+__pycache__/
+```
+
+**Only patterns between `# BEGIN FORBIDDEN` and `# END FORBIDDEN`** are enforced by hooks and workflows. Patterns outside this block are helpful `.gitignore` suggestions that won't block commits.
+
+### Blocked Categories
+
+**Data files**
+`.csv`, `.tsv`, `.xlsx`, `.xls`, `.ods`, `.sav`, `.dta`, `.RData`, `.rds`, `.sas7bdat`, `.feather`, `.parquet`, `.pickle`, `.h5`, `.hdf5`, `.sqlite`, `.db`
+
+**Medical and research data**
+`.nii`, `.nii.gz`, `.dcm` (DICOM), `.edf`, `.bdf`, `.eeg`, `.vhdr` (biosignals), `.fastq`, `.bam`, `.vcf`, `.bed` (genomics)
+
+**Credentials**
+`.env`, `.pem`, `.key`, `.p12`, `.pfx`
+
+**Archives** (may contain data)
+`.zip`, `.tar.gz`, `.rar`, `.7z`
+
+### Exceptions
+
+Some patterns have exceptions for common safe files:
+
+| Blocked | Exceptions |
+|---------|------------|
+| `*.json` | `package.json`, `package-lock.json`, `tsconfig.json`, `composer.json`, `appsettings.json` |
+| `*.xml` | `pom.xml`, `web.xml`, `*.csproj`, `*.fsproj`, `*.vbproj` |
+| `.env` | (no exceptions) |
+
+See `central-gitignore.txt` for the complete list.
+
+## Personal Information Detection
+
+The PII scanner detects patterns common in Dutch healthcare research.
+
+### What Gets Detected
+
+**Dutch names**
+- First names from `personal-info-lists/common-dutch-firstnames.txt`
+- Surnames from `personal-info-lists/common-dutch-surnames.txt`
+- Combinations suggesting full names
+
+**Dutch addresses**
+- Street names from `personal-info-lists/common-dutch-streetnames.txt`
+- House number patterns
+- Postal codes (1234 AB format)
+- City names
+
+**Identifiers**
+- Patient IDs (7-digit MRN patterns)
+- BSN (Burgerservicenummer) with checksum validation
+- Medical record number formats
+
+### Reducing False Positives
+
+The PII detection is tuned for medical research contexts. Common Dutch words that happen to match name patterns are excluded. If you encounter false positives, please report them so we can refine the detection rules.
+
+## Secrets Detection
+
+Secrets scanning uses gitleaks with a custom configuration (`gitleaks.toml`).
+
+### What Gets Detected
+
+**Cloud provider credentials**
+AWS access keys, Azure credentials, GCP service account keys
+
+**API keys and tokens**
+GitHub tokens, Slack tokens, Stripe keys, SendGrid keys, OAuth tokens, JWT tokens
+
+**Database credentials**
+Connection strings, database passwords
+
+**Private keys**
+SSH private keys, PEM files, PKCS12 certificates
+
+**Generic secrets**
+High-entropy strings that may be passwords or tokens
+
+### Configuration
+
+The `gitleaks.toml` file defines detection rules and allowlists. It includes rules for common secret patterns and excludes known safe patterns like example placeholders.
 
 ## Usage
 
-### Using the GitHub Workflow in a Repository
+### Using the Reusable Workflows
 
-To use the reusable workflow in another repository, create a workflow file like this:
+To add security checks to a repository, create a workflow file:
 
 ```yaml
-name: Check for forbidden filetypes
+# .github/workflows/security-check.yml
+name: Security Check
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
+    branches: [main, master]
 
 jobs:
-  security-check:
-    uses: bavadeve/org-security-workflows/.github/workflows/check-forbidden-filetypes.yml@main
+  filetype-check:
+    uses: AmsterdamUMC/org-security-workflows/.github/workflows/check-forbidden-filetypes.yml@main
+
+  personal-info-check:
+    uses: AmsterdamUMC/org-security-workflows/.github/workflows/check-personal-info.yml@main
+
+  secrets-check:
+    uses: AmsterdamUMC/org-security-workflows/.github/workflows/check-gitleaks.yml@main
 ```
 
-Replace `@main` with a version tag for stability if available.
+For stability, replace `@main` with a specific version tag (e.g., `@v0.2.21`).
 
-### Using the Pre-commit Hook
+### Using the Pre-Commit Hooks
 
-In your repository's `.pre-commit-config.yaml`:
+Add to your repository's `.pre-commit-config.yaml`:
 
 ```yaml
 repos:
-  - repo: https://github.com/bavadeve/org-security-workflows
-    rev: v0.2.5
+  - repo: https://github.com/AmsterdamUMC/org-security-workflows
+    rev: v0.2.21
     hooks:
       - id: check-forbidden-filetypes
+        stages: [pre-commit]
+      - id: check-forbidden-filetypes-prepush
+        stages: [pre-push]
+      - id: check-personal-info
+        stages: [pre-commit]
+      - id: check-personal-info-prepush
+        stages: [pre-push]
 
-repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -75,7 +237,7 @@ repos:
       - id: check-merge-conflict
 ```
 
-Then install:
+Install the hooks:
 
 ```bash
 pip install pre-commit
@@ -83,55 +245,18 @@ pre-commit install
 pre-commit install --hook-type pre-push
 ```
 
+## What Happens When a File Is Blocked
 
-This ensures commits are checked locally before being pushed.
-
-## How It Works
-
-### The Central Gitignore
-
-The `central-gitignore.txt` file contains two sections:
-
-```gitignore
-# BEGIN FORBIDDEN
-*.csv
-*.xlsx
-*.json
-!package.json    # Exception: this file is allowed
-# END FORBIDDEN
-
-# Everything below is convenience-only (not enforced)
-.DS_Store
-__pycache__/
-output/
-```
-
-**Only patterns between `# BEGIN FORBIDDEN` and `# END FORBIDDEN`** are enforced by the hooks and GitHub Action. Everything else is just helpful `.gitignore` patterns that won't block commits.
-
-### Exceptions
-
-Some files are blocked by default but have exceptions for common safe files:
-
-| Blocked | Exceptions |
-|---------|------------|
-| `*.json` | `package.json`, `package-lock.json`, `tsconfig.json`, etc. |
-| `*.xml` | `pom.xml`, `web.xml`, `*.csproj`, etc. |
-| `.env` | (no exceptions) |
-
-See `central-gitignore.txt` for the full list.
-
-## What Happens When a File is Blocked
-
-### Pre-commit hook
+### Pre-commit Hook
 
 ```
-══════════════════════════════════════════════════════════════
+===============================================================
   ERROR: Forbidden file types detected!
-══════════════════════════════════════════════════════════════
+===============================================================
 
 The following files match forbidden data patterns:
 
-  ✗ data/patients.csv
+  X data/patients.csv
 
 These file types are blocked to prevent accidental data leaks.
 
@@ -141,19 +266,43 @@ To bypass (NOT recommended): git commit --no-verify
 
 ### GitHub Action
 
-The workflow will fail with a red ❌ and annotate the problematic files.
+The workflow fails with a red X and annotates the problematic files. Pull requests cannot be merged until the violation is resolved.
+
+When a violation is detected:
+1. The workflow fails
+2. A security alert is sent to the `security-telemetry` repository
+3. An issue may be created for tracking
+4. The security team is notified
+
+## Telemetry Integration
+
+When GitHub Actions detect violations, they send telemetry to the `security-telemetry` repository via repository dispatch:
+
+```json
+{
+  "event_type": "security_alert",
+  "client_payload": {
+    "repository": "AmsterdamUMC/example-repo",
+    "status": "fail",
+    "actor": "username",
+    "sha": "abc123...",
+    "ref": "refs/heads/main",
+    "timestamp": "2024-01-15T10:30:00Z",
+    "run_id": "12345678",
+    "blocked_files": ["data.csv", "secrets.env"]
+  }
+}
+```
+
+This enables centralized monitoring and alerting across all organization repositories.
 
 ## Remediation
 
-If sensitive data was accidentally committed:
+### If Sensitive Data Was Committed
 
-### If the repo is public
+If the repository is public, immediately make it private and contact your data steward.
 
-1. **Immediately** make the repo private
-2. Contact your data steward / privacy officer
-3. Follow the steps below to clean history
-
-### Cleaning Git history
+To remove files from Git history:
 
 ```bash
 # Install git-filter-repo (recommended over filter-branch)
@@ -162,66 +311,117 @@ pip install git-filter-repo
 # Remove a specific file from all history
 git filter-repo --path data/patients.csv --invert-paths
 
-# Force push (coordinate with collaborators first!)
+# Force push (coordinate with collaborators first)
 git push --force --all
 ```
 
-See [GitHub's guide on removing sensitive data](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository).
+See [GitHub's guide on removing sensitive data](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository) for detailed instructions.
+
+### Reporting Security Incidents
+
+If sensitive data may have been exposed:
+
+1. Do not open a public GitHub issue
+2. Contact [b.vandervelde@amsterdamumc.nl](mailto:b.vandervelde@amsterdamumc.nl) immediately
+3. Include: repository name, what was exposed, when it was committed
 
 ## Troubleshooting
 
 ### Pre-commit hook not running
+
 ```bash
 pre-commit install
 pre-commit install --hook-type pre-push
 ```
 
 ### Hook using outdated rules
+
 ```bash
 pre-commit clean
+pre-commit autoupdate
 pre-commit install
 pre-commit install --hook-type pre-push
 ```
 
-### Need to bypass (use with caution!)
+### Need to bypass (use with caution)
+
 ```bash
 git commit --no-verify
 git push --no-verify
 ```
 
-### For testing
+Bypassing local hooks does not bypass GitHub Actions. Violations will still be caught on push.
+
+### Testing the hooks
 
 ```bash
-touch dummy.csv # create dummy data file
-git add dummy.csv # should be stopped by .gitignore
-git add -f dummy.csv # push through .gitignore
-git commit -m 'test data upload' # should be stopped by pre-commit
-git commit --no-verify -m 'test data upload' # push through pre-commit
-git push origin main # should be stopped by pre-push
-git push origin main --no-verify # push through pre-push --> file is uploaded and should trigger a GitHub Action
+# Create a test file
+echo "test" > test.csv
+
+# Try to add it (should be blocked by .gitignore if using template)
+git add test.csv
+
+# Force add to bypass .gitignore
+git add -f test.csv
+
+# Try to commit (should be blocked by pre-commit)
+git commit -m "test"
+
+# Clean up
+git reset HEAD test.csv
+rm test.csv
 ```
 
-## Notes for Windows / GitHub Desktop Users
+### Windows / GitHub Desktop
 
-On Windows, pre-commit hooks will not run correctly in default GitHub Desktop shell environments. To enable proper behavior:
+Pre-commit hooks require a Unix-like shell. On Windows:
 
-1. Install Git Bash (from https://gitforwindows.org/)
-2. In GitHub Desktop: File → Options → Git → Shell → select "Git Bash"
+1. Install Git Bash from https://gitforwindows.org/
+2. In GitHub Desktop: File > Options > Git > Shell > select "Git Bash"
 
 Alternatively, use Git Bash or WSL directly for committing.
 
-## Security Layers
+## Updating Security Rules
 
-| Layer              | Purpose                                               | Limitations                                      |
-|-------------------|--------------------------------------------------------|--------------------------------------------------|
-| `.gitignore`       | Prevents common sensitive files from being tracked     | Can be bypassed with `git add -f`                |
-| Pre-commit hook   | Blocks dangerous files from being committed locally     | Requires local setup, can be skipped             |
-| GitHub Action     | Catches violations on push or PR                        | Cannot block direct pushes unless protected      |
-| Branch protection | Prevents merging PRs that fail security checks          | Must be configured per repository                |
+### Forbidden Patterns
 
-These layers provide increasing levels of safety, from developer machines to repository-level enforcement.
+Edit `central-gitignore.txt` and commit. Changes take effect:
+- Immediately for new workflow runs
+- On next `pre-commit autoupdate` for local hooks
+
+### PII Detection
+
+Update files in `personal-info-lists/` to add or remove name patterns.
+
+### Secrets Detection
+
+Edit `gitleaks.toml` to modify detection rules or allowlists.
+
+### Versioning
+
+When making changes:
+1. Update the relevant configuration files
+2. Test thoroughly in a non-production repository
+3. Create a new version tag (e.g., `v0.2.22`)
+4. Update documentation to reference the new version
+
+Repositories using `@main` receive changes immediately. Repositories pinned to a version tag must update their `.pre-commit-config.yaml` to receive changes.
+
+## Related Repositories
+
+| Repository | Purpose |
+|------------|---------|
+| `org-security-workflows` | Security rules and hooks (this repo) |
+| `org-security-scanner` | Organization-wide scanning for violations |
+| `security-telemetry` | Central alerting and logging |
+| `repo-template-secure` | Template for new research repositories |
 
 ## License
 
 MIT License - See [LICENSE](LICENSE)
 
+## Support
+
+**Technical issues:** [b.vandervelde@amsterdamumc.nl](mailto:b.vandervelde@amsterdamumc.nl)
+**False positives:** Open an issue in this repository
+**Security incidents:** See Remediation section above
