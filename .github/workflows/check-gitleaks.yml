@@ -15,7 +15,7 @@ jobs:
                   fetch-depth: 0 # Need full history for comprehensive scanning
 
             - name: Run gitleaks check with telemetry
-              uses: AmsterdamUMC-test/org-security-workflows/actions/gitleaks-check@main
+              uses: AmsterdamUMC/org-security-workflows/actions/gitleaks-check@main
               with:
                   telemetry-pat: ${{ secrets.TELEMETRY_PAT }}
-                  telemetry-repo: AmsterdamUMC-test/security-telemetry
+                  telemetry-repo: AmsterdamUMC/security-telemetry
