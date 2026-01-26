@@ -7,7 +7,7 @@ inputs:
   telemetry-repo:
     description: "Repository to send telemetry to (format: owner/repo)"
     required: false
-    default: "AmsterdamUMC-test/security-telemetry"
+    default: "AmsterdamUMC/security-telemetry"
   gitleaks-config-url:
     description: "URL to central gitleaks.toml configuration"
     required: false
@@ -167,6 +167,6 @@ runs:
         echo "Found ${{ steps.scan.outputs.secrets_found }} potential secret(s)."
         echo ""
         echo "These must be removed and rotated immediately."
-        echo "See: https://github.com/AmsterdamUMC-test/org-security-workflows#secrets-remediation"
+        echo "See: https://github.com/AmsterdamUMC/org-security-workflows#secrets-remediation"
         echo ""
         exit 1

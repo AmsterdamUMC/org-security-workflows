@@ -5,15 +5,15 @@ inputs:
   rules-url:
     description: "URL to central-gitignore.txt"
     required: false
-    default: "https://raw.githubusercontent.com/AmsterdamUMC-test/org-security-workflows/main/central-gitignore.txt"
+    default: "https://raw.githubusercontent.com/AmsterdamUMC/org-security-workflows/main/central-gitignore.txt"
   telemetry-pat:
     description: "PAT with repo scope for sending telemetry via repository dispatch"
     required: false
     default: ""
   telemetry-repo:
-    description: "Repository to receive telemetry (e.g., AmsterdamUMC-test/security-telemetry)"
+    description: "Repository to receive telemetry (e.g., AmsterdamUMC/security-telemetry)"
     required: false
-    default: "AmsterdamUMC-test/security-telemetry"
+    default: "AmsterdamUMC/security-telemetry"
 
 runs:
   using: "composite"
@@ -114,7 +114,7 @@ runs:
             done
             echo ""
             echo "These files must be removed from the repository."
-            echo "See: https://github.com/AmsterdamUMC-test/org-security-workflows#remediation"
+            echo "See: https://github.com/AmsterdamUMC/org-security-workflows#remediation"
             STATUS="fail"
             MESSAGE="forbidden_files_found"
           else

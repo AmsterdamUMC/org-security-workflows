@@ -8,7 +8,7 @@
 #
 set -euo pipefail
 
-RULES_URL="https://raw.githubusercontent.com/AmsterdamUMC-test/org-security-workflows/main/central-gitignore.txt"
+RULES_URL="https://raw.githubusercontent.com/AmsterdamUMC/org-security-workflows/main/central-gitignore.txt"
 
 TMP_DIR="$(mktemp -d)"
 TMP_GITIGNORE="$TMP_DIR/central-gitignore.txt"
