@@ -139,8 +139,8 @@ runs:
           exit 0
         fi
 
-    - name: Save violation details to file
-      if: always()
+    - name: Send telemetry via repository dispatch
+      if: steps.scan.outputs.violations_found == '1' && inputs.telemetry-pat != '' && inputs.telemetry-repo != ''
       shell: bash
       run: |
         # Save violations for telemetry
