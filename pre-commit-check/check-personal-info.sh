@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Pre-commit hook for detecting personal information
 # Scans staged files for Dutch first names, surnames, street names, and patient IDs
 

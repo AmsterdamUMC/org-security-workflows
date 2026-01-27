@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Pre-commit hook: checks staged files against FORBIDDEN patterns only
 # Extracts patterns between "# BEGIN FORBIDDEN" and "# END FORBIDDEN"

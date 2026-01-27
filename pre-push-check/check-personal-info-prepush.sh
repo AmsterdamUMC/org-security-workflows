@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Pre-push hook for detecting personal information
 # Scans files in commits about to be pushed for Dutch first names, surnames, street names, and patient IDs
 
