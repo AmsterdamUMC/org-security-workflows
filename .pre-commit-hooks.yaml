@@ -1,8 +1,34 @@
 - id: check-forbidden-filetypes
-  name: Check forbidden file types (pre-commit)
+  name: Check for forbidden file types
+  description: Block data files that may contain sensitive information
+  entry: check_filetypes
+  language: python
+  types: [file]
+  pass_filenames: true
+
+- id: check-personal-info
+  name: Check for personal information
+  description: Detect Dutch names, addresses, and patient IDs
+  entry: check_personal_info
+  language: python
+  types: [text]
+  pass_filenames: true
+
+# Bash versions (legacy, for backwards compatibility)
+- id: check-forbidden-filetypes-bash
+  name: Check for forbidden file types (bash)
+  description: Block data files that may contain sensitive information
   entry: pre-commit-check/check-filetypes.sh
   language: script
-  stages: [pre-commit]
+  types: [file]
+  pass_filenames: true
+
+- id: check-personal-info-bash
+  name: Check for personal information (bash)
+  description: Detect Dutch names, addresses, and patient IDs
+  entry: pre-commit-check/check-personal-info.sh
+  language: script
+  types: [text]
   pass_filenames: true
 
 - id: check-forbidden-filetypes-prepush
@@ -12,14 +38,6 @@
   stages: [pre-push]
   always_run: true
   pass_filenames: false
-
-- id: check-personal-info
-  name: Check for personal information (names, addresses, patient IDs)
-  entry: pre-commit-check/check-personal-info.sh
-  language: script
-  stages: [pre-commit]
-  files: .*
-  always_run: true
 
 - id: check-personal-info-prepush
   name: Check for personal information before push
