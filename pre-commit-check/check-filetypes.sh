@@ -95,7 +95,7 @@ for FILE in "${FILES[@]}"; do
   done
 
   # If blocked, check if it's an exception
-  if [[ "$is_blocked" == true ]]; then
+  if [[ "$is_blocked" == true && ${#EXCEPTION_PATTERNS[@]} -gt 0 ]]; then
     for pattern in "${EXCEPTION_PATTERNS[@]}"; do
       if matches_pattern "$FILE" "$pattern"; then
         is_exception=true
