@@ -3,8 +3,7 @@
   entry: pre-commit-check/check-filetypes.sh
   language: script
   stages: [pre-commit]
-  files: .*
-  always_run: true
+  pass_filenames: true
 
 - id: check-forbidden-filetypes-prepush
   name: Check forbidden file types (pre-push)
