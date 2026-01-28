@@ -20,31 +20,34 @@ EXCEPTION_PATTERNS=()
 
 in_forbidden=false
 while IFS= read -r line; do
-  # Check for section markers
-  if [[ "$line" == "# BEGIN FORBIDDEN" ]]; then
-    in_forbidden=true
-    continue
-  elif [[ "$line" == "# END FORBIDDEN" ]]; then
-    in_forbidden=false
-    continue
-  fi
-
-  # Skip if not in forbidden section
-  [[ "$in_forbidden" == false ]] && continue
-
-  # Skip comments and empty lines
-  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-
-  # Trim whitespace
-  line="${line#"${line%%[![:space:]]*}"}"
-  line="${line%"${line##*[![:space:]]}"}"
-
-  # Check if it's an exception pattern (starts with !)
-  if [[ "$line" == !* ]]; then
-    EXCEPTION_PATTERNS+=("${line#!}")
-  else
-    BLOCKED_PATTERNS+=("${line}")
-  fi
+    # Strip Windows carriage return (CRLF -> LF)
+    line="${line%$'\r'}"
+    
+    # Check for section markers
+    if [[ "$line" == "# BEGIN FORBIDDEN" ]]; then
+        in_forbidden=true
+        continue
+    elif [[ "$line" == "# END FORBIDDEN" ]]; then
+        in_forbidden=false
+        continue
+    fi
+    
+    # Skip if not in forbidden section
+    [[ "$in_forbidden" == false ]] && continue
+    
+    # Skip comments and empty lines
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    
+    # Trim whitespace
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    
+    # Check if it's an exception pattern (starts with !)
+    if [[ "$line" == !* ]]; then
+        EXCEPTION_PATTERNS+=("${line#!}")
+    else
+        BLOCKED_PATTERNS+=("${line}")
+    fi
 done < "$RULES_FILE"
 
 if [[ ${#BLOCKED_PATTERNS[@]} -eq 0 ]]; then
