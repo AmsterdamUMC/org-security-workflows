@@ -20,11 +20,11 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Install ripgrep
+    - name: Install ripgrep and jq
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y ripgrep
+        sudo apt-get install -y ripgrep jq
 
     - name: Fetch reference lists
       shell: bash
@@ -75,6 +75,25 @@ runs:
         VIOLATIONS_FOUND=0
         VIOLATION_TYPES=""
 
+        # Initialize violation details file for collecting JSON objects
+        DETAILS_FILE=$(mktemp)
+        echo "[]" > "$DETAILS_FILE"
+
+        # Helper function to add violation detail
+        add_violation() {
+          local file="$1"
+          local line="$2"
+          local category="$3"
+          
+          # Sanitize file path (remove leading ./)
+          file="${file#./}"
+          
+          # Add to JSON array using jq
+          jq --arg f "$file" --arg l "$line" --arg c "$category" \
+            '. += [{"file": $f, "line": ($l | tonumber), "category": $c}]' \
+            "$DETAILS_FILE" > "${DETAILS_FILE}.tmp" && mv "${DETAILS_FILE}.tmp" "$DETAILS_FILE"
+        }
+
         # Function to validate BSN using 11-proof (elfproef)
         is_valid_bsn() {
           local digits="$1"
@@ -104,12 +123,16 @@ runs:
           VIOLATIONS_FOUND=1
           STATUS="fail"
           VIOLATION_TYPES="${VIOLATION_TYPES}patient_id,"
+          
+          # Extract file:line for telemetry
+          while IFS=: read -r file linenum _; do
+            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "patient_id"
+          done <<< "$PATIENT_ID_MATCHES"
         fi
 
         # Check for 9-digit BSN numbers with 11-proof validation
         echo "Checking for BSN numbers..."
         BSN_VIOLATION_COUNT=0
-        BSN_VIOLATION_FILES=""
         while IFS= read -r line; do
           [[ -z "$line" ]] && continue
           # Extract file:line:content
@@ -122,15 +145,13 @@ runs:
           for candidate in $(echo "$content" | grep -oE '\b[0-9]{9}\b' || true); do
             if is_valid_bsn "$candidate"; then
               BSN_VIOLATION_COUNT=$((BSN_VIOLATION_COUNT + 1))
-              BSN_VIOLATION_FILES="${BSN_VIOLATION_FILES}${file}:${linenum}\n"
+              add_violation "$file" "$linenum" "bsn"
             fi
           done
         done < <(rg -n --glob '!*.md' '\b[0-9]{9}\b' . 2>/dev/null | head -100 || true)
 
         if [[ $BSN_VIOLATION_COUNT -gt 0 ]]; then
           echo "::error::Found $BSN_VIOLATION_COUNT valid BSN number(s) (passed 11-proof)"
-          # Only show file:line locations, not the actual BSN values
-          echo -e "$BSN_VIOLATION_FILES" | head -5
           VIOLATIONS_FOUND=1
           STATUS="fail"
           VIOLATION_TYPES="${VIOLATION_TYPES}bsn,"
@@ -146,6 +167,11 @@ runs:
           VIOLATIONS_FOUND=1
           STATUS="fail"
           VIOLATION_TYPES="${VIOLATION_TYPES}fullname_firstname,"
+          
+          # Extract file:line for telemetry
+          while IFS=: read -r file linenum _; do
+            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "fullname"
+          done <<< "$FIRSTNAME_MATCHES"
         fi
 
         # Check for capitalized word + surname (potential full names)
@@ -158,6 +184,11 @@ runs:
           VIOLATIONS_FOUND=1
           STATUS="fail"
           VIOLATION_TYPES="${VIOLATION_TYPES}fullname_surname,"
+          
+          # Extract file:line for telemetry
+          while IFS=: read -r file linenum _; do
+            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "fullname"
+          done <<< "$SURNAME_MATCHES"
         fi
 
         # Check for addresses (known streets + number)
@@ -169,6 +200,11 @@ runs:
           VIOLATIONS_FOUND=1
           STATUS="fail"
           VIOLATION_TYPES="${VIOLATION_TYPES}address_known,"
+          
+          # Extract file:line for telemetry
+          while IFS=: read -r file linenum _; do
+            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "address"
+          done <<< "$ADDRESS_MATCHES"
         fi
 
         # Check for street pattern + number
@@ -180,19 +216,30 @@ runs:
           VIOLATIONS_FOUND=1
           STATUS="fail"
           VIOLATION_TYPES="${VIOLATION_TYPES}address_pattern,"
+          
+          # Extract file:line for telemetry
+          while IFS=: read -r file linenum _; do
+            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "address"
+          done <<< "$STREET_PATTERN_MATCHES"
         fi
 
         # Remove trailing comma from violation types
         VIOLATION_TYPES=$(echo "$VIOLATION_TYPES" | sed 's/,$//')
 
+        # Read and deduplicate violation details, limit to 50 entries
+        VIOLATION_DETAILS=$(jq -c 'unique | .[0:50]' "$DETAILS_FILE")
+        rm -f "$DETAILS_FILE"
+
         # Set outputs (do NOT exit here - let telemetry run first)
         echo "status=${STATUS}" >> $GITHUB_OUTPUT
         echo "violations_found=${VIOLATIONS_FOUND}" >> $GITHUB_OUTPUT
         echo "violation_types=${VIOLATION_TYPES}" >> $GITHUB_OUTPUT
+        echo "violation_details=${VIOLATION_DETAILS}" >> $GITHUB_OUTPUT
 
         if [[ $VIOLATIONS_FOUND -eq 1 ]]; then
           echo ""
           echo "Personal information detected - will fail after telemetry"
+          echo "Violations: $(echo "$VIOLATION_DETAILS" | jq 'length') locations"
         else
           echo ""
           echo "No personal information detected"
@@ -205,11 +252,19 @@ runs:
         STATUS: ${{ steps.scan.outputs.status }}
         VIOLATIONS_FOUND: ${{ steps.scan.outputs.violations_found }}
         VIOLATION_TYPES: ${{ steps.scan.outputs.violation_types }}
+        VIOLATION_DETAILS: ${{ steps.scan.outputs.violation_details }}
         TELEMETRY_REPO: ${{ inputs.telemetry-repo }}
       with:
         github-token: ${{ inputs.telemetry-pat }}
         script: |
           const [owner, repo] = process.env.TELEMETRY_REPO.split('/');
+
+          let violationDetails = [];
+          try {
+            violationDetails = JSON.parse(process.env.VIOLATION_DETAILS || '[]');
+          } catch (e) {
+            console.log('Warning: Could not parse violation details');
+          }
 
           await github.rest.repos.createDispatchEvent({
             owner: owner,
@@ -224,11 +279,13 @@ runs:
               status: process.env.STATUS,
               violations_found: parseInt(process.env.VIOLATIONS_FOUND),
               violation_types: process.env.VIOLATION_TYPES.split(',').filter(t => t),
+              violation_details: violationDetails,
               timestamp: new Date().toISOString()
             }
           });
 
           console.log('Telemetry sent to ' + process.env.TELEMETRY_REPO);
+          console.log('Violation details: ' + violationDetails.length + ' locations');
 
     - name: No telemetry configured
       if: ${{ inputs.telemetry-pat == '' }}
