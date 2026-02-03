@@ -11,6 +11,8 @@ from pathlib import Path
 import io
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.version_info[0] < 3:
+    sys.exit("This script requires Python 3")
 
 # Dutch street suffixes
 STREET_SUFFIXES = r"straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
