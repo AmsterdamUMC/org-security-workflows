@@ -1,16 +1,17 @@
 #!/usr/bin/env python
 """
 Pre-commit hook for detecting personal information.
-Scans staged files for Dutch first names, surnames, street names, and patient IDs.
+Scans staged files for Dutch first names, surnames, street names, patient IDs, and BSN.
 """
 
+import io
 import re
 import subprocess
 import sys
 from pathlib import Path
-import io
+
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 if sys.version_info[0] < 3:
     sys.exit("This script requires Python 3")
 
@@ -47,6 +48,20 @@ def get_staged_files() -> list[str]:
     return [f for f in result.stdout.strip().split("\n") if f]
 
 
+def is_valid_bsn(digits: str) -> bool:
+    """
+    Check if 9 digits pass the BSN 11-proof (elfproef).
+    This reduces false positives for random 9-digit numbers.
+    """
+    if len(digits) != 9 or not digits.isdigit():
+        return False
+    # BSN 11-proof: sum of (digit * weight) must be divisible by 11
+    # Weights are 9, 8, 7, 6, 5, 4, 3, 2, -1 (last digit is subtracted)
+    weights = [9, 8, 7, 6, 5, 4, 3, 2, -1]
+    total = sum(int(d) * w for d, w in zip(digits, weights))
+    return total % 11 == 0
+
+
 def check_file_for_personal_info(
     filepath: Path,
     firstnames: list[str],
@@ -79,7 +94,10 @@ def check_file_for_personal_info(
     streetnames_pattern = r"(" + "|".join(re.escape(s) for s in streetnames) + r")"
 
     # Pattern for 7-digit patient IDs
-    patient_id_pattern = re.compile(r"\b[0-9]{7}\b")
+    patient_id_pattern = re.compile(r"\b([0-9]{7})\b")
+
+    # Pattern for 9-digit BSN numbers
+    bsn_pattern = re.compile(r"\b([0-9]{9})\b")
 
     # Pattern for first name followed by capitalized word
     firstname_fullname_pattern = re.compile(
@@ -95,7 +113,7 @@ def check_file_for_personal_info(
     street_with_number_pattern = re.compile(
         streetnames_pattern + r"\s+[0-9]", re.IGNORECASE
     )
-    
+
     # Pattern for any word ending in street suffix + number
     street_suffix_pattern = re.compile(
         r"\b[A-Z][a-z]{4,}(" + STREET_SUFFIXES + r")\s+[0-9]"
@@ -112,22 +130,26 @@ def check_file_for_personal_info(
             violations.append(("Patient ID", line_num, line_stripped))
             continue  # One violation per line is enough
 
+        # Check for 9-digit BSN numbers (with 11-proof validation)
+        bsn_match = bsn_pattern.search(line_stripped)
+        if bsn_match and is_valid_bsn(bsn_match.group(1)):
+            violations.append(("BSN", line_num, line_stripped))
+            continue
+
         # Check for first name followed by capitalized word (potential full name)
         match = firstname_fullname_pattern.search(line_stripped)
         if match and not street_suffix_filter.search(line_stripped):
-            violations.append(("Potential Full Name", line_num, line_stripped))
+            violations.append(("Full Name", line_num, line_stripped))
             continue
 
         # Check for capitalized word followed by surname (potential full name)
         match = surname_fullname_pattern.search(line_stripped)
         if match and not street_suffix_filter.search(line_stripped):
-            violations.append(("Potential Full Name", line_num, line_stripped))
+            violations.append(("Full Name", line_num, line_stripped))
             continue
 
         # Check for known street names with house numbers
-        if re.search(
-            streetnames_pattern + r"\s+[0-9]", line_stripped, re.IGNORECASE
-        ):
+        if street_with_number_pattern.search(line_stripped):
             violations.append(("Address", line_num, line_stripped))
             continue
 
@@ -165,13 +187,13 @@ def main() -> int:
     surnames = load_reference_file(surnames_file)
     streetnames = load_reference_file(streetnames_file)
 
-    print("🔍 Scanning staged files for personal information...")
+    print("Scanning staged files for personal information...")
 
     # Get files to check - either from arguments (pre-commit) or staged files
     files = sys.argv[1:] if len(sys.argv) > 1 else get_staged_files()
 
     if not files:
-        print("✓ No files to check")
+        print("[OK] No files to check")
         return 0
 
     # Check each file
@@ -192,14 +214,15 @@ def main() -> int:
         for filepath, violations in all_violations.items():
             for violation_type, line_num, content in violations[:5]:  # Limit to 5 per file
                 print(f"  [{violation_type}] {filepath}:")
-                print(f"    Line {line_num}: {content[:80]}...")
+                truncated = content[:80] + "..." if len(content) > 80 else content
+                print(f"    Line {line_num}: {truncated}")
         print()
         print("=" * 63)
-        print("  ⚠️  PERSONAL INFORMATION DETECTED - COMMIT BLOCKED")
+        print("  ERROR: Personal information detected - commit blocked")
         print("=" * 63)
         print()
         print("Personal information was detected in your staged files.")
-        print("This may include patient IDs, names, or addresses.")
+        print("This may include patient IDs, BSN numbers, names, or addresses.")
         print()
         print("Please remove the sensitive data before committing.")
         print()
@@ -209,7 +232,7 @@ def main() -> int:
         return 1
     else:
         print()
-        print("✓ No personal information detected in staged files")
+        print("[OK] No personal information detected in staged files")
         return 0
 
 

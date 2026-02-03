@@ -35,7 +35,7 @@ runs:
       shell: bash
       id: scan
       run: |
-        echo "🔐 Scanning repository for secrets..."
+        echo "Scanning repository for secrets..."
 
         # Run gitleaks with config from safe location
         # DO NOT use config from repository being scanned (code injection risk)
@@ -61,31 +61,31 @@ runs:
             echo "message=secrets_detected" >> $GITHUB_OUTPUT
             
             echo ""
-            echo "⚠️  Found $SECRETS_COUNT potential secret(s)"
+            echo "Found $SECRETS_COUNT potential secret(s)"
             
-            # Extract first 10 findings for telemetry and display
+            # Extract findings for telemetry - EXCLUDE actual secret values
+            # Only include file, line, rule ID, and description (no match/secret content)
             jq -c '[.[] | {
               file: .File,
               line: .StartLine,
               rule: .RuleID,
-              description: .Description,
-              match: .Match
+              description: .Description
             }] | .[0:10]' gitleaks-report.json > secrets_summary.json
             
             echo ""
-            echo "Summary of findings:"
+            echo "Summary of findings (locations only - secrets redacted):"
             jq -r '.[] | "  - \(.file):\(.line) [\(.rule)] \(.description)"' secrets_summary.json
           else
             echo "status=ok" >> $GITHUB_OUTPUT
             echo "message=no_secrets" >> $GITHUB_OUTPUT
             echo "secrets_found=0" >> $GITHUB_OUTPUT
-            echo "✅ No secrets detected"
+            echo "No secrets detected"
           fi
         else
           echo "status=ok" >> $GITHUB_OUTPUT
           echo "message=no_secrets" >> $GITHUB_OUTPUT
           echo "secrets_found=0" >> $GITHUB_OUTPUT
-          echo "✅ No secrets detected (no report generated)"
+          echo "No secrets detected (no report generated)"
         fi
 
     - name: Upload gitleaks report as artifact
@@ -121,7 +121,7 @@ runs:
         script: |
           const fs = require('fs');
 
-          // Read secrets summary
+          // Read secrets summary (contains only file/line/rule - no actual secrets)
           let secretsList = [];
           try {
             const content = fs.readFileSync('secrets_for_telemetry.json', 'utf8');
@@ -143,7 +143,8 @@ runs:
               ref: process.env.GITHUB_REF,
               actor: process.env.GITHUB_ACTOR,
               secrets_count: parseInt(process.env.SECRETS_COUNT),
-              secrets_list: secretsList,
+              // Only file locations and rule types - no secret values
+              findings: secretsList,
               timestamp: new Date().toISOString()
             }
           });

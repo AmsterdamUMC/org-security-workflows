@@ -2,7 +2,7 @@
 """
 Pre-push hook for detecting personal information.
 Scans files in commits about to be pushed for Dutch first names, surnames,
-street names, and patient IDs.
+street names, patient IDs, and BSN.
 """
 
 import io
@@ -51,9 +51,6 @@ def run_git_command(args: list[str]) -> str:
 
 def get_remote_branch() -> str | None:
     """Determine the remote tracking branch to compare against."""
-    # Get current branch name
-    current_branch = run_git_command(["rev-parse", "--abbrev-ref", "HEAD"])
-
     # Try to get upstream tracking branch
     result = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
@@ -108,13 +105,27 @@ def get_files_to_check() -> list[str]:
         # Running as standalone hook - compare with remote branch
         remote_branch = get_remote_branch()
         if not remote_branch:
-            print("⚠️  No remote branch found to compare against, skipping pre-push check")
+            print("[WARNING] No remote branch found to compare against, skipping pre-push check")
             return []
 
         output = run_git_command(
             ["diff", "--name-only", "--diff-filter=AM", f"{remote_branch}..HEAD"]
         )
         return [f for f in output.split("\n") if f]
+
+
+def is_valid_bsn(digits: str) -> bool:
+    """
+    Check if 9 digits pass the BSN 11-proof (elfproef).
+    This reduces false positives for random 9-digit numbers.
+    """
+    if len(digits) != 9 or not digits.isdigit():
+        return False
+    # BSN 11-proof: sum of (digit * weight) must be divisible by 11
+    # Weights are 9, 8, 7, 6, 5, 4, 3, 2, -1 (last digit is subtracted)
+    weights = [9, 8, 7, 6, 5, 4, 3, 2, -1]
+    total = sum(int(d) * w for d, w in zip(digits, weights))
+    return total % 11 == 0
 
 
 def check_file_for_personal_info(
@@ -153,7 +164,10 @@ def check_file_for_personal_info(
     streetnames_pattern = r"(" + "|".join(re.escape(s) for s in streetnames) + r")"
 
     # Pattern for 7-digit patient IDs
-    patient_id_pattern = re.compile(r"\b[0-9]{7}\b")
+    patient_id_pattern = re.compile(r"\b([0-9]{7})\b")
+
+    # Pattern for 9-digit BSN numbers
+    bsn_pattern = re.compile(r"\b([0-9]{9})\b")
 
     # Pattern for first name followed by capitalized word
     firstname_fullname_pattern = re.compile(firstnames_pattern + r"\s+[A-Z][a-z]{2,}")
@@ -182,20 +196,26 @@ def check_file_for_personal_info(
             violations.append(("Patient ID", line_num, line_stripped))
             continue
 
+        # Check for 9-digit BSN numbers (with 11-proof validation)
+        bsn_match = bsn_pattern.search(line_stripped)
+        if bsn_match and is_valid_bsn(bsn_match.group(1)):
+            violations.append(("BSN", line_num, line_stripped))
+            continue
+
         # Check for first name followed by capitalized word (potential full name)
         match = firstname_fullname_pattern.search(line_stripped)
         if match and not street_suffix_filter.search(line_stripped):
-            violations.append(("Potential Full Name", line_num, line_stripped))
+            violations.append(("Full Name", line_num, line_stripped))
             continue
 
         # Check for capitalized word followed by surname (potential full name)
         match = surname_fullname_pattern.search(line_stripped)
         if match and not street_suffix_filter.search(line_stripped):
-            violations.append(("Potential Full Name", line_num, line_stripped))
+            violations.append(("Full Name", line_num, line_stripped))
             continue
 
         # Check for known street names with house numbers
-        if re.search(streetnames_pattern + r"\s+[0-9]", line_stripped, re.IGNORECASE):
+        if street_with_number_pattern.search(line_stripped):
             violations.append(("Address", line_num, line_stripped))
             continue
 
@@ -233,13 +253,13 @@ def main() -> int:
     surnames = load_reference_file(surnames_file)
     streetnames = load_reference_file(streetnames_file)
 
-    print("🔍 Scanning commits for personal information before push...")
+    print("Scanning commits for personal information before push...")
 
     # Get files to check
     files = get_files_to_check()
 
     if not files:
-        print("✓ No files to check")
+        print("[OK] No files to check")
         return 0
 
     print(f"Checking {len(files)} changed files...")
@@ -266,11 +286,11 @@ def main() -> int:
                 print(f"    Line {line_num}: {truncated}")
         print()
         print("=" * 63)
-        print("  ⚠️  PERSONAL INFORMATION DETECTED - PUSH BLOCKED")
+        print("  ERROR: Personal information detected - push blocked")
         print("=" * 63)
         print()
         print("Personal information was detected in your commits.")
-        print("This may include patient IDs, names, or addresses.")
+        print("This may include patient IDs, BSN numbers, names, or addresses.")
         print()
         print("Please remove the sensitive data before pushing.")
         print()
@@ -280,7 +300,7 @@ def main() -> int:
         return 1
     else:
         print()
-        print("✓ No personal information detected in commits")
+        print("[OK] No personal information detected in commits")
         return 0
 
 
