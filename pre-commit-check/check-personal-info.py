@@ -81,19 +81,19 @@ def check_file_for_personal_info(
 
     # Pattern for first name followed by capitalized word
     firstname_fullname_pattern = re.compile(
-        firstnames_pattern + r"\s+[A-Z][a-z]{2,}", re.IGNORECASE
+        firstnames_pattern + r"\s+[A-Z][a-z]{2,}"
     )
 
     # Pattern for capitalized word followed by surname
     surname_fullname_pattern = re.compile(
-        r"[A-Z][a-z]{2,}\s+" + surnames_pattern, re.IGNORECASE
+        r"[A-Z][a-z]{2,}\s+" + surnames_pattern
     )
 
     # Pattern for street names with house numbers (from list)
     street_with_number_pattern = re.compile(
-        streetnames_pattern + r"[[:space:]]+[0-9]", re.IGNORECASE
+        streetnames_pattern + r"\s+[0-9]", re.IGNORECASE
     )
-
+    
     # Pattern for any word ending in street suffix + number
     street_suffix_pattern = re.compile(
         r"\b[A-Z][a-z]{4,}(" + STREET_SUFFIXES + r")\s+[0-9]"
