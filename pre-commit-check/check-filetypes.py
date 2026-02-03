@@ -8,7 +8,9 @@ from central-gitignore.txt
 import sys
 import fnmatch
 from pathlib import Path
-
+import io
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 def load_forbidden_patterns(rules_file: Path) -> tuple[list[str], list[str]]:
     """
