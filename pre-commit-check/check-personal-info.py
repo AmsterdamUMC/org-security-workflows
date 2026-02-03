@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 Pre-commit hook for detecting personal information.
 Scans staged files for Dutch first names, surnames, street names, and patient IDs.

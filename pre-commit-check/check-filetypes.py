@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 Pre-commit hook: checks staged files against FORBIDDEN patterns.
 Extracts patterns between "# BEGIN FORBIDDEN" and "# END FORBIDDEN"
