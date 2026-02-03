@@ -1,16 +1,16 @@
 - id: check-forbidden-filetypes
   name: Check for forbidden file types
   description: Block data files that may contain sensitive information
-  entry: check_filetypes
-  language: python
+  entry: pre-commit-check/check-filetypes.py
+  language: script
   types: [file]
   pass_filenames: true
 
 - id: check-personal-info
   name: Check for personal information
   description: Detect Dutch names, addresses, and patient IDs
-  entry: check_personal_info
-  language: python
+  entry: pre-commit-check/check-personal-info.py
+  language: script
   types: [text]
   pass_filenames: true
 
