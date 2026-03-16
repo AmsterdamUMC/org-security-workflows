@@ -31,22 +31,24 @@ runs:
         echo "Configuration preview:"
         head -20 /tmp/gitleaks.toml
 
+    - name: Install gitleaks
+      shell: bash
+      run: |
+        wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
+        tar -xzf gitleaks_8.18.2_linux_x64.tar.gz
+        sudo mv gitleaks /usr/local/bin/
+        rm gitleaks_8.18.2_linux_x64.tar.gz
+
     - name: Run Gitleaks scan
       shell: bash
       id: scan
       run: |
         echo "Scanning repository for secrets..."
 
-        # Run gitleaks with config from safe location
-        # DO NOT use config from repository being scanned (code injection risk)
-        docker run --rm \
-          -v "$PWD:/scan" \
-          -v "/tmp/gitleaks.toml:/gitleaks.toml:ro" \
-          zricethezav/gitleaks:latest \
-          detect \
-          --source /scan \
-          --config /gitleaks.toml \
-          --report-path /scan/gitleaks-report.json \
+        gitleaks detect \
+          --source . \
+          --config /tmp/gitleaks.toml \
+          --report-path gitleaks-report.json \
           --report-format json \
           --verbose \
           --exit-code 0 || true
