@@ -13,12 +13,16 @@ import sys
 from pathlib import Path
 
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stdout = io.TextIOWrapper(
+        sys.stdout.buffer, encoding="utf-8", errors="replace"
+    )
 if sys.version_info[0] < 3:
     sys.exit("This script requires Python 3")
 
 # Dutch street suffixes
-STREET_SUFFIXES = r"straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
+STREET_SUFFIXES = (
+    r"straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
+)
 
 
 def load_reference_file(filepath: Path) -> list[str]:
@@ -98,18 +102,30 @@ def get_files_to_check() -> list[str]:
         else:
             # Only check added/modified files, not deleted
             output = run_git_command(
-                ["diff", "--name-only", "--diff-filter=AM", f"{from_ref}..{to_ref}"]
+                [
+                    "diff",
+                    "--name-only",
+                    "--diff-filter=AM",
+                    f"{from_ref}..{to_ref}",
+                ]
             )
         return [f for f in output.split("\n") if f]
     else:
         # Running as standalone hook - compare with remote branch
         remote_branch = get_remote_branch()
         if not remote_branch:
-            print("[WARNING] No remote branch found to compare against, skipping pre-push check")
+            print(
+                "[WARNING] No remote branch found to compare against, skipping pre-push check"
+            )
             return []
 
         output = run_git_command(
-            ["diff", "--name-only", "--diff-filter=AM", f"{remote_branch}..HEAD"]
+            [
+                "diff",
+                "--name-only",
+                "--diff-filter=AM",
+                f"{remote_branch}..HEAD",
+            ]
         )
         return [f for f in output.split("\n") if f]
 
@@ -144,10 +160,6 @@ def check_file_for_personal_info(
     if filepath.suffix == ".md":
         return violations
 
-    # Skip if file doesn't exist (deleted files)
-    if not filepath.exists():
-        return violations
-
     # Skip binary files
     if not is_text_file(filepath):
         return violations
@@ -159,9 +171,15 @@ def check_file_for_personal_info(
         return violations
 
     # Build regex patterns
-    firstnames_pattern = r"\b(" + "|".join(re.escape(n) for n in firstnames) + r")\b"
-    surnames_pattern = r"\b(" + "|".join(re.escape(n) for n in surnames) + r")\b"
-    streetnames_pattern = r"(" + "|".join(re.escape(s) for s in streetnames) + r")"
+    firstnames_pattern = (
+        r"\b(" + "|".join(re.escape(n) for n in firstnames) + r")\b"
+    )
+    surnames_pattern = (
+        r"\b(" + "|".join(re.escape(n) for n in surnames) + r")\b"
+    )
+    streetnames_pattern = (
+        r"(" + "|".join(re.escape(s) for s in streetnames) + r")"
+    )
 
     # Pattern for 7-digit patient IDs
     patient_id_pattern = re.compile(r"\b([0-9]{7})\b")
@@ -170,10 +188,14 @@ def check_file_for_personal_info(
     bsn_pattern = re.compile(r"\b([0-9]{9})\b")
 
     # Pattern for first name followed by capitalized word
-    firstname_fullname_pattern = re.compile(firstnames_pattern + r"\s+[A-Z][a-z]{2,}")
+    firstname_fullname_pattern = re.compile(
+        firstnames_pattern + r"\s+[A-Z][a-z]{2,}"
+    )
 
     # Pattern for capitalized word followed by surname
-    surname_fullname_pattern = re.compile(r"[A-Z][a-z]{2,}\s+" + surnames_pattern)
+    surname_fullname_pattern = re.compile(
+        r"[A-Z][a-z]{2,}\s+" + surnames_pattern
+    )
 
     # Pattern for street names with house numbers (from list)
     street_with_number_pattern = re.compile(
@@ -282,7 +304,9 @@ def main() -> int:
         for filepath, violations in all_violations.items():
             for violation_type, line_num, content in violations[:5]:
                 print(f"  [{violation_type}] {filepath}:")
-                truncated = content[:80] + "..." if len(content) > 80 else content
+                truncated = (
+                    content[:80] + "..." if len(content) > 80 else content
+                )
                 print(f"    Line {line_num}: {truncated}")
         print()
         print("=" * 63)
