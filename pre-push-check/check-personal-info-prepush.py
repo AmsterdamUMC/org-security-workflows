@@ -144,33 +144,7 @@ def is_valid_bsn(digits: str) -> bool:
     return total % 11 == 0
 
 
-def check_file_for_personal_info(
-    filepath: Path,
-    firstnames: list[str],
-    surnames: list[str],
-    streetnames: list[str],
-) -> list[tuple[str, int, str]]:
-    """
-    Check a file for personal information.
-    Returns list of (violation_type, line_number, content) tuples.
-    """
-    violations = []
-
-    # Skip markdown files (documentation often contains example names/addresses)
-    if filepath.suffix == ".md":
-        return violations
-
-    # Skip binary files
-    if not is_text_file(filepath):
-        return violations
-
-    try:
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.readlines()
-    except (IOError, OSError):
-        return violations
-
-    # Build regex patterns
+def build_patterns(firstnames, surnames, streetnames) -> dict:
     firstnames_pattern = (
         r"\b(" + "|".join(re.escape(n) for n in firstnames) + r")\b"
     )
@@ -181,68 +155,68 @@ def check_file_for_personal_info(
         r"(" + "|".join(re.escape(s) for s in streetnames) + r")"
     )
 
-    # Pattern for 7-digit patient IDs
-    patient_id_pattern = re.compile(r"\b([0-9]{7})\b")
+    return {
+        "patient_id": re.compile(r"\b([0-9]{7})\b"),
+        "bsn": re.compile(r"\b([0-9]{9})\b"),
+        "firstname_fullname": re.compile(
+            firstnames_pattern + r"\s+[A-Z][a-z]{2,}"
+        ),
+        "surname_fullname": re.compile(r"[A-Z][a-z]{2,}\s+" + surnames_pattern),
+        "street_with_number": re.compile(
+            streetnames_pattern + r"\s+[0-9]", re.IGNORECASE
+        ),
+        "street_suffix": re.compile(
+            r"\b[A-Z][a-z]{4,}(" + STREET_SUFFIXES + r")\s+[0-9]"
+        ),
+        "street_suffix_filter": re.compile(STREET_SUFFIXES, re.IGNORECASE),
+    }
 
-    # Pattern for 9-digit BSN numbers
-    bsn_pattern = re.compile(r"\b([0-9]{9})\b")
 
-    # Pattern for first name followed by capitalized word
-    firstname_fullname_pattern = re.compile(
-        firstnames_pattern + r"\s+[A-Z][a-z]{2,}"
-    )
+def check_file_for_personal_info(
+    filepath: Path,
+    patterns: dict,
+) -> list[tuple[str, int, str]]:
+    violations = []
 
-    # Pattern for capitalized word followed by surname
-    surname_fullname_pattern = re.compile(
-        r"[A-Z][a-z]{2,}\s+" + surnames_pattern
-    )
+    if filepath.suffix == ".md":
+        return violations
 
-    # Pattern for street names with house numbers (from list)
-    street_with_number_pattern = re.compile(
-        streetnames_pattern + r"\s+[0-9]", re.IGNORECASE
-    )
+    if not is_text_file(filepath):
+        return violations
 
-    # Pattern for any word ending in street suffix + number
-    street_suffix_pattern = re.compile(
-        r"\b[A-Z][a-z]{4,}(" + STREET_SUFFIXES + r")\s+[0-9]"
-    )
-
-    # Street suffix pattern for filtering false positives
-    street_suffix_filter = re.compile(STREET_SUFFIXES, re.IGNORECASE)
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+    except (IOError, OSError):
+        return violations
 
     for line_num, line in enumerate(lines, 1):
         line_stripped = line.rstrip()
 
-        # Check for 7-digit patient IDs
-        if patient_id_pattern.search(line_stripped):
+        if patterns["patient_id"].search(line_stripped):
             violations.append(("Patient ID", line_num, line_stripped))
             continue
 
-        # Check for 9-digit BSN numbers (with 11-proof validation)
-        bsn_match = bsn_pattern.search(line_stripped)
+        bsn_match = patterns["bsn"].search(line_stripped)
         if bsn_match and is_valid_bsn(bsn_match.group(1)):
             violations.append(("BSN", line_num, line_stripped))
             continue
 
-        # Check for first name followed by capitalized word (potential full name)
-        match = firstname_fullname_pattern.search(line_stripped)
-        if match and not street_suffix_filter.search(line_stripped):
+        match = patterns["firstname_fullname"].search(line_stripped)
+        if match and not patterns["street_suffix_filter"].search(line_stripped):
             violations.append(("Full Name", line_num, line_stripped))
             continue
 
-        # Check for capitalized word followed by surname (potential full name)
-        match = surname_fullname_pattern.search(line_stripped)
-        if match and not street_suffix_filter.search(line_stripped):
+        match = patterns["surname_fullname"].search(line_stripped)
+        if match and not patterns["street_suffix_filter"].search(line_stripped):
             violations.append(("Full Name", line_num, line_stripped))
             continue
 
-        # Check for known street names with house numbers
-        if street_with_number_pattern.search(line_stripped):
+        if patterns["street_with_number"].search(line_stripped):
             violations.append(("Address", line_num, line_stripped))
             continue
 
-        # Check for street suffix pattern with house number
-        if street_suffix_pattern.search(line_stripped):
+        if patterns["street_suffix"].search(line_stripped):
             violations.append(("Address", line_num, line_stripped))
             continue
 
@@ -274,6 +248,7 @@ def main() -> int:
     firstnames = load_reference_file(firstnames_file)
     surnames = load_reference_file(surnames_file)
     streetnames = load_reference_file(streetnames_file)
+    patterns = build_patterns(firstnames, surnames, streetnames)
 
     print("Scanning commits for personal information before push...")
 
@@ -292,9 +267,7 @@ def main() -> int:
     for filepath_str in files:
         filepath = Path(filepath_str)
         if filepath.exists():
-            violations = check_file_for_personal_info(
-                filepath, firstnames, surnames, streetnames
-            )
+            violations = check_file_for_personal_info(filepath, patterns)
             if violations:
                 all_violations[filepath_str] = violations
 
