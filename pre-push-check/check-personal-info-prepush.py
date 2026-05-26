@@ -97,10 +97,8 @@ def get_files_to_check() -> list[str]:
     if from_ref and to_ref:
         # Running via pre-commit
         if from_ref == "0" * 40:
-            # New branch - check all files
             output = run_git_command(["ls-tree", "-r", "--name-only", to_ref])
         else:
-            # Only check added/modified files, not deleted
             output = run_git_command(
                 [
                     "diff",
@@ -111,23 +109,29 @@ def get_files_to_check() -> list[str]:
             )
         return [f for f in output.split("\n") if f]
     else:
-        # Running as standalone hook - compare with remote branch
-        remote_branch = get_remote_branch()
-        if not remote_branch:
-            print(
-                "[WARNING] No remote branch found to compare against, skipping pre-push check"
-            )
-            return []
+        # Running as standalone git hook - read from stdin
+        files = []
+        for line in sys.stdin:
+            parts = line.strip().split()
+            if len(parts) >= 4:
+                local_sha = parts[1]
+                remote_sha = parts[3]
 
-        output = run_git_command(
-            [
-                "diff",
-                "--name-only",
-                "--diff-filter=AM",
-                f"{remote_branch}..HEAD",
-            ]
-        )
-        return [f for f in output.split("\n") if f]
+                if remote_sha == "0" * 40:
+                    output = run_git_command(
+                        ["ls-tree", "-r", "--name-only", local_sha]
+                    )
+                else:
+                    output = run_git_command(
+                        [
+                            "diff",
+                            "--name-only",
+                            "--diff-filter=AM",
+                            f"{remote_sha}..{local_sha}",
+                        ]
+                    )
+                files.extend([f for f in output.split("\n") if f])
+        return files
 
 
 def is_valid_bsn(digits: str) -> bool:
