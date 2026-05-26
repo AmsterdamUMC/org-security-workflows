@@ -9,10 +9,14 @@ import sys
 import fnmatch
 from pathlib import Path
 import io
+
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(
+        sys.stdout.buffer, encoding="utf-8", errors="replace"
+    )
 if sys.version_info[0] < 3:
     sys.exit("This script requires Python 3")
+
 
 def load_forbidden_patterns(rules_file: Path) -> tuple[list[str], list[str]]:
     """
@@ -58,10 +62,6 @@ def matches_pattern(filepath: str, pattern: str) -> bool:
 
     # Handle patterns like *.csv, *.nii.gz, .env, .env.*
     if fnmatch.fnmatch(basename, pattern):
-        return True
-
-    # Handle exact matches
-    if basename == pattern:
         return True
 
     return False
