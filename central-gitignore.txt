@@ -37,7 +37,7 @@
 *.RData
 *.rds
 *.mat
-*.pk1
+*.pkl
 *.npz
 *.npy
 *.fig
