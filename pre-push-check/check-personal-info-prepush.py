@@ -1,22 +1,28 @@
 #!/usr/bin/env python
 """
-Pre-commit hook for detecting personal information.
-Scans staged files for Dutch first names, surnames, street names, patient IDs, and BSN.
+Pre-push hook for detecting personal information.
+Scans files in commits about to be pushed for Dutch first names, surnames,
+street names, patient IDs, and BSN.
 """
 
 import io
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stdout = io.TextIOWrapper(
+        sys.stdout.buffer, encoding="utf-8", errors="replace"
+    )
 if sys.version_info[0] < 3:
     sys.exit("This script requires Python 3")
 
 # Dutch street suffixes
-STREET_SUFFIXES = r"straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
+STREET_SUFFIXES = (
+    r"straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
+)
 
 
 def load_reference_file(filepath: Path) -> list[str]:
@@ -30,7 +36,6 @@ def is_text_file(filepath: Path) -> bool:
     try:
         with open(filepath, "rb") as f:
             chunk = f.read(8192)
-            # Check for null bytes (binary indicator)
             if b"\x00" in chunk:
                 return False
         return True
@@ -38,14 +43,95 @@ def is_text_file(filepath: Path) -> bool:
         return False
 
 
-def get_staged_files() -> list[str]:
-    """Get list of staged files."""
+def run_git_command(args: list[str]) -> str:
+    """Run a git command and return stdout."""
     result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+        ["git"] + args,
         capture_output=True,
         text=True,
     )
-    return [f for f in result.stdout.strip().split("\n") if f]
+    return result.stdout.strip()
+
+
+def get_remote_branch() -> str | None:
+    """Determine the remote tracking branch to compare against."""
+    # Try to get upstream tracking branch
+    result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode == 0 and result.stdout.strip():
+        remote_branch = result.stdout.strip()
+        # Verify it exists
+        verify = subprocess.run(
+            ["git", "rev-parse", remote_branch],
+            capture_output=True,
+            text=True,
+        )
+        if verify.returncode == 0:
+            return remote_branch
+
+    # Fall back to origin/main or origin/master
+    for fallback in ["origin/main", "origin/master"]:
+        verify = subprocess.run(
+            ["git", "rev-parse", fallback],
+            capture_output=True,
+            text=True,
+        )
+        if verify.returncode == 0:
+            return fallback
+
+    return None
+
+
+def get_files_to_check() -> list[str]:
+    """
+    Get list of files to check based on pre-commit environment variables
+    or by comparing with remote branch.
+    """
+    from_ref = os.environ.get("PRE_COMMIT_FROM_REF", "")
+    to_ref = os.environ.get("PRE_COMMIT_TO_REF", "")
+
+    if from_ref and to_ref:
+        # Running via pre-commit
+        if from_ref == "0" * 40:
+            output = run_git_command(["ls-tree", "-r", "--name-only", to_ref])
+        else:
+            output = run_git_command(
+                [
+                    "diff",
+                    "--name-only",
+                    "--diff-filter=AM",
+                    f"{from_ref}..{to_ref}",
+                ]
+            )
+        return [f for f in output.split("\n") if f]
+    else:
+        # Running as standalone git hook - read from stdin
+        files = []
+        for line in sys.stdin:
+            parts = line.strip().split()
+            if len(parts) >= 4:
+                local_sha = parts[1]
+                remote_sha = parts[3]
+
+                if remote_sha == "0" * 40:
+                    output = run_git_command(
+                        ["ls-tree", "-r", "--name-only", local_sha]
+                    )
+                else:
+                    output = run_git_command(
+                        [
+                            "diff",
+                            "--name-only",
+                            "--diff-filter=AM",
+                            f"{remote_sha}..{local_sha}",
+                        ]
+                    )
+                files.extend([f for f in output.split("\n") if f])
+        return files
 
 
 def is_valid_bsn(digits: str) -> bool:
@@ -69,7 +155,7 @@ def build_patterns(firstnames, surnames, streetnames) -> dict:
     Names use set membership (O(1) lookup) instead of giant regex
     alternations, since the reference lists are large (10k-150k entries)
     and a single alternation-based regex over that many strings would be
-    far too slow to run on every commit.
+    far too slow to run on every push.
 
     Firstnames are single tokens (hyphenated forms like "Jan-Willem" are
     handled by word_token's character class, so no n-gram grouping is
@@ -121,17 +207,11 @@ def check_file_for_personal_info(
     filepath: Path,
     patterns: dict,
 ) -> list[tuple[str, int, str]]:
-    """
-    Check a file for personal information.
-    Returns list of (violation_type, line_number, content) tuples.
-    """
     violations = []
 
-    # Skip markdown files (documentation often contains example names/addresses)
     if filepath.suffix == ".md":
         return violations
 
-    # Skip binary files
     if not is_text_file(filepath):
         return violations
 
@@ -215,7 +295,6 @@ def check_file_for_personal_info(
 
 def main() -> int:
     # Find reference files relative to this script
-    # Script is in pre-commit-check/, reference files are in repo root
     script_dir = Path(__file__).parent
     repo_root = script_dir.parent
     reference_dir = repo_root / "personal-info-lists"
@@ -232,23 +311,25 @@ def main() -> int:
     ]:
         if not filepath.exists():
             print(f"ERROR: {name} reference file not found: {filepath}")
+            print(f"Expected location: {reference_dir}/{filepath.name}")
             return 1
 
     # Load reference data
     firstnames = load_reference_file(firstnames_file)
     surnames = load_reference_file(surnames_file)
     streetnames = load_reference_file(streetnames_file)
-
     patterns = build_patterns(firstnames, surnames, streetnames)
 
-    print("Scanning staged files for personal information...")
+    print("Scanning commits for personal information before push...")
 
-    # Get files to check - either from arguments (pre-commit) or staged files
-    files = sys.argv[1:] if len(sys.argv) > 1 else get_staged_files()
+    # Get files to check
+    files = get_files_to_check()
 
     if not files:
         print("[OK] No files to check")
         return 0
+
+    print(f"Checking {len(files)} changed files...")
 
     # Check each file
     all_violations: dict[str, list[tuple[str, int, str]]] = {}
@@ -264,27 +345,29 @@ def main() -> int:
     if all_violations:
         print()
         for filepath, violations in all_violations.items():
-            for violation_type, line_num, content in violations[:5]:  # Limit to 5 per file
+            for violation_type, line_num, content in violations[:5]:
                 print(f"  [{violation_type}] {filepath}:")
-                truncated = content[:80] + "..." if len(content) > 80 else content
+                truncated = (
+                    content[:80] + "..." if len(content) > 80 else content
+                )
                 print(f"    Line {line_num}: {truncated}")
         print()
         print("=" * 63)
-        print("  ERROR: Personal information detected - commit blocked")
+        print("  ERROR: Personal information detected - push blocked")
         print("=" * 63)
         print()
-        print("Personal information was detected in your staged files.")
+        print("Personal information was detected in your commits.")
         print("This may include patient IDs, BSN numbers, names, or addresses.")
         print()
-        print("Please remove the sensitive data before committing.")
+        print("Please remove the sensitive data before pushing.")
         print()
         print("To bypass this check (NOT RECOMMENDED):")
-        print("  git commit --no-verify")
+        print("  git push --no-verify")
         print()
         return 1
     else:
         print()
-        print("[OK] No personal information detected in staged files")
+        print("[OK] No personal information detected in commits")
         return 0
 
 

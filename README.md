@@ -21,11 +21,15 @@ org-security-workflows/
 │   └── personal-info-check/
 │       └── action.yml                       # Composite action for PII detection
 ├── pre-commit-check/
-│   ├── check-filetypes.sh                   # Pre-commit hook for filetypes
-│   └── check-personal-info.sh               # Pre-commit hook for PII
+│   ├── check-filetypes.py                   # Pre-commit hook for filetypes
+│   ├── check-filetypes.sh                   # Legacy bash version
+│   ├── check-personal-info.py               # Pre-commit hook for PII
+│   └── check-personal-info.sh               # Legacy bash version
 ├── pre-push-check/
-│   ├── check-filetypes-prepush.sh           # Pre-push hook for filetypes
-│   └── check-personal-info-prepush.sh       # Pre-push hook for PII
+│   ├── check-filetypes-prepush.py           # Pre-push hook for filetypes
+│   ├── check-filetypes-prepush.sh           # Legacy bash version
+│   ├── check-personal-info-prepush.py       # Pre-push hook for PII
+│   └── check-personal-info-prepush.sh       # Legacy bash version
 ├── personal-info-lists/
 │   ├── common-dutch-firstnames.txt          # Dutch first name database
 │   ├── common-dutch-surnames.txt            # Dutch surname database
@@ -51,7 +55,7 @@ The hooks and workflows reference centralized configuration files in this reposi
 
 ```
 Developer Machine                              GitHub
-──────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────
 
 git add ──> .gitignore ──> blocked silently
 
@@ -76,7 +80,7 @@ The system performs three primary security checks:
 | Check | What It Detects | Hook | Workflow |
 |-------|-----------------|------|----------|
 | Forbidden filetypes | Data files, medical imaging, databases | Yes | Yes |
-| Personal information | Dutch names, addresses, patient IDs | Yes | Yes |
+| Personal information | Dutch names, addresses, patient IDs, BSN | Yes | Yes |
 | Secrets | API keys, tokens, passwords, private keys | No | Yes |
 
 Secrets detection runs only as a GitHub Action (not in local hooks) because gitleaks requires additional tooling that may not be available on all developer machines.
@@ -91,7 +95,6 @@ The `central-gitignore.txt` file defines which file types are blocked:
 # BEGIN FORBIDDEN
 *.csv
 *.xlsx
-*.json
 !package.json         # Exception: allowed
 !package-lock.json    # Exception: allowed
 # END FORBIDDEN
@@ -105,29 +108,31 @@ __pycache__/
 
 ### Blocked Categories
 
-**Data files**
-`.csv`, `.tsv`, `.xlsx`, `.xls`, `.ods`, `.sav`, `.dta`, `.RData`, `.rds`, `.sas7bdat`, `.feather`, `.parquet`, `.pickle`, `.h5`, `.hdf5`, `.sqlite`, `.db`
+**Tabular data**
+`.csv`, `.tsv`, `.xlsx`, `.xls`, `.sav`, `.dta`, `.feather`, `.parquet`
 
-**Medical and research data**
-`.nii`, `.nii.gz`, `.dcm` (DICOM), `.edf`, `.bdf`, `.eeg`, `.vhdr` (biosignals), `.fastq`, `.bam`, `.vcf`, `.bed` (genomics)
+**Statistical/scientific data formats**
+`.RData`, `.rds`, `.mat`, `.pk1`, `.npz`, `.npy`, `.fig`
 
-**Credentials**
-`.env`, `.pem`, `.key`, `.p12`, `.pfx`
+**Databases**
+`.sqlite`, `.db`
+
+**Medical imaging & biosignals**
+`.nii`, `.nii.gz`, `.dcm` (DICOM), `.edf`, `.bdf`, `.eeg`, `.vhdr`, `.vmrk`
+
+**Genomics & bioinformatics**
+`.fastq`, `.fastq.gz`, `.fasta`, `.fasta.gz`, `.fna`, `.bam`, `.sam`, `.vcf`, `.gtf`, `.gff`, `.bed`, `.wig`, `.bigWig`
+
+**Audio/video data**
+`.mp4`, `.avi`, `.mov`, `.mkv`, `.webm`, `.wav`, `.flac`
 
 **Archives** (may contain data)
-`.zip`, `.tar.gz`, `.rar`, `.7z`
+`.zip`, `.tar.gz`, `.7z`, `.rar`
 
-### Exceptions
+**Credentials & secrets**
+`.env`, `.env.*`, `.key`, `.pem`, `.pfx`, `.crt`
 
-Some patterns have exceptions for common safe files:
-
-| Blocked | Exceptions |
-|---------|------------|
-| `*.json` | `package.json`, `package-lock.json`, `tsconfig.json`, `composer.json`, `appsettings.json` |
-| `*.xml` | `pom.xml`, `web.xml`, `*.csproj`, `*.fsproj`, `*.vbproj` |
-| `.env` | (no exceptions) |
-
-See `central-gitignore.txt` for the complete list.
+See `central-gitignore.txt` for the complete and current list.
 
 ## Personal Information Detection
 
@@ -138,22 +143,25 @@ The PII scanner detects patterns common in Dutch healthcare research.
 **Dutch names**
 - First names from `personal-info-lists/common-dutch-firstnames.txt`
 - Surnames from `personal-info-lists/common-dutch-surnames.txt`
-- Combinations suggesting full names
+- Combinations suggesting full names (e.g., first name followed by capitalized word)
 
 **Dutch addresses**
 - Street names from `personal-info-lists/common-dutch-streetnames.txt`
-- House number patterns
-- Postal codes (1234 AB format)
-- City names
+- Any word with Dutch street suffixes (straat, laan, weg, plein, gracht, etc.) followed by a house number
+- Postal code patterns
 
 **Identifiers**
-- Patient IDs (7-digit MRN patterns)
-- BSN (Burgerservicenummer) with checksum validation
-- Medical record number formats
+- Patient IDs (7-digit patterns)
+- BSN (Burgerservicenummer) - validated using the 11-proof (elfproef) checksum to reduce false positives
 
 ### Reducing False Positives
 
-The PII detection is tuned for medical research contexts. Common Dutch words that happen to match name patterns are excluded. If you encounter false positives, please report them so we can refine the detection rules.
+The PII detection is tuned for medical research contexts:
+- Markdown files (`.md`) are excluded to allow documentation with example names
+- Street suffix patterns filter out false positive name matches
+- BSN detection uses checksum validation (only ~1 in 11 random 9-digit numbers pass)
+
+If you encounter false positives, please report them so we can refine the detection rules.
 
 ## Secrets Detection
 
@@ -218,6 +226,7 @@ repos:
   - repo: https://github.com/AmsterdamUMC/org-security-workflows
     rev: v0.2.21
     hooks:
+      # Python versions (recommended)
       - id: check-forbidden-filetypes
         stages: [pre-commit]
       - id: check-forbidden-filetypes-prepush
@@ -271,16 +280,27 @@ The workflow fails with a red X and annotates the problematic files. Pull reques
 When a violation is detected:
 1. The workflow fails
 2. A security alert is sent to the `security-telemetry` repository
-3. An issue may be created for tracking
-4. The security team is notified
+3. The security team is notified
 
-## Telemetry Integration
+## Telemetry
 
-When GitHub Actions detect violations, they send telemetry to the `security-telemetry` repository via repository dispatch:
+When GitHub Actions detect violations, they send telemetry to the `security-telemetry` repository via repository dispatch. This enables centralized monitoring and alerting across all organization repositories.
+
+### Privacy
+
+**Telemetry never includes sensitive content.** Only metadata is sent:
+
+| Check | What's Sent | What's NOT Sent |
+|-------|-------------|-----------------|
+| Filetypes | Filenames that were blocked | File contents |
+| Personal info | Violation types (e.g., "bsn", "fullname") | Actual names, BSN numbers, addresses |
+| Secrets | File locations and rule IDs | Actual secret values |
+
+Example telemetry payload:
 
 ```json
 {
-  "event_type": "security_alert",
+  "event_type": "personal_info_violation",
   "client_payload": {
     "repository": "AmsterdamUMC/example-repo",
     "status": "fail",
@@ -289,18 +309,33 @@ When GitHub Actions detect violations, they send telemetry to the `security-tele
     "ref": "refs/heads/main",
     "timestamp": "2024-01-15T10:30:00Z",
     "run_id": "12345678",
-    "blocked_files": ["data.csv", "secrets.env"]
+    "violation_types": ["bsn", "fullname_firstname", "address_known"]
   }
 }
 ```
 
-This enables centralized monitoring and alerting across all organization repositories.
-
 ## Remediation
+
+### If a Commit Is Blocked
+
+Review the error message to identify which files or patterns triggered the block. Common solutions:
+
+1. **Remove the file** if it contains actual sensitive data
+2. **Add to `.gitignore`** to prevent future accidents
+3. **Contact your data steward** if you believe it's a false positive
 
 ### If Sensitive Data Was Committed
 
 If the repository is public, immediately make it private and contact your data steward.
+
+<a name="secrets-remediation"></a>
+### Secrets Remediation
+
+If secrets were detected:
+
+1. **Rotate the secret immediately** - assume it's compromised
+2. **Remove from Git history** using the steps below
+3. **Update any systems** using the old secret
 
 To remove files from Git history:
 
@@ -374,12 +409,13 @@ rm test.csv
 
 ### Windows / GitHub Desktop
 
-Pre-commit hooks require a Unix-like shell. On Windows:
+Pre-commit hooks require Python 3. On Windows:
 
-1. Install Git Bash from https://gitforwindows.org/
-2. In GitHub Desktop: File > Options > Git > Shell > select "Git Bash"
+1. Ensure Python 3 is installed and in your PATH
+2. Install Git Bash from https://gitforwindows.org/
+3. In GitHub Desktop: File > Options > Git > Shell > select "Git Bash"
 
-Alternatively, use Git Bash or WSL directly for committing.
+The Python-based hooks handle Windows path and encoding differences automatically.
 
 ## Updating Security Rules
 

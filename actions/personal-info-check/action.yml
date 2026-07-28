@@ -1,5 +1,5 @@
 name: "Personal Information Check"
-description: "Scans for personal information (names, addresses, patient IDs) in repository files"
+description: "Scans for personal information (names, addresses, patient IDs, BSN) in repository files"
 inputs:
   telemetry-pat:
     description: "PAT token for sending telemetry"
@@ -7,7 +7,7 @@ inputs:
   telemetry-repo:
     description: "Repository to send telemetry to (format: owner/repo)"
     required: false
-    default: ""
+    default: "AmsterdamUMC/security-telemetry"
   personal-info-lists-repo:
     description: "Repository containing personal info reference lists"
     required: false
@@ -20,11 +20,11 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Install ripgrep
+    - name: Install ripgrep and jq
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y ripgrep
+        sudo apt-get install -y ripgrep jq
 
     - name: Fetch reference lists
       shell: bash
@@ -61,7 +61,7 @@ runs:
       shell: bash
       id: scan
       run: |
-        echo "🔍 Scanning repository for personal information..."
+        echo "Scanning repository for personal information..."
 
         # Build patterns
         ALL_FIRSTNAMES=$(cat "$FIRSTNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
@@ -71,106 +71,200 @@ runs:
         # Street suffixes (used for address detection + filtering name matches)
         STREET_SUFFIXES="straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
 
+        STATUS="ok"
         VIOLATIONS_FOUND=0
-        VIOLATION_DETAILS=""
+        VIOLATION_TYPES=""
+
+        # Initialize violation details file for collecting JSON objects
+        DETAILS_FILE=$(mktemp)
+        echo "[]" > "$DETAILS_FILE"
+
+        # Helper function to add violation detail
+        add_violation() {
+          local file="$1"
+          local line="$2"
+          local category="$3"
+          
+          # Sanitize file path (remove leading ./)
+          file="${file#./}"
+          
+          # Add to JSON array using jq
+          jq --arg f "$file" --arg l "$line" --arg c "$category" \
+            '. += [{"file": $f, "line": ($l | tonumber), "category": $c}]' \
+            "$DETAILS_FILE" > "${DETAILS_FILE}.tmp" && mv "${DETAILS_FILE}.tmp" "$DETAILS_FILE"
+        }
+
+        # Function to validate BSN using 11-proof (elfproef)
+        is_valid_bsn() {
+          local digits="$1"
+          if [[ ${#digits} -ne 9 || ! "$digits" =~ ^[0-9]+$ ]]; then
+            return 1
+          fi
+          local total=$(( \
+            9 * ${digits:0:1} + \
+            8 * ${digits:1:1} + \
+            7 * ${digits:2:1} + \
+            6 * ${digits:3:1} + \
+            5 * ${digits:4:1} + \
+            4 * ${digits:5:1} + \
+            3 * ${digits:6:1} + \
+            2 * ${digits:7:1} - \
+            1 * ${digits:8:1} \
+          ))
+          (( total % 11 == 0 ))
+        }
 
         # Check for 7-digit patient IDs
         echo "Checking for patient IDs..."
-        PATIENT_ID_MATCHES=$(rg -n --glob '!*.md' '\b[0-9]{7}\b' . 2>/dev/null || true)
+        PATIENT_ID_MATCHES=$(rg -n --glob '!*.md' '\b[0-9]{7}\b' . 2>/dev/null | head -20 || true)
         if [[ -n "$PATIENT_ID_MATCHES" ]]; then
-          echo "::error::Found 7-digit patient IDs"
-          echo "$PATIENT_ID_MATCHES" | head -10
+          echo "::error::Found potential 7-digit patient IDs"
+          echo "$PATIENT_ID_MATCHES" | head -5
           VIOLATIONS_FOUND=1
-          VIOLATION_DETAILS="${VIOLATION_DETAILS}Patient IDs found\n"
+          STATUS="fail"
+          VIOLATION_TYPES="${VIOLATION_TYPES}patient_id,"
+          
+          # Extract file:line for telemetry
+          while IFS=: read -r file linenum _; do
+            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "patient_id"
+          done <<< "$PATIENT_ID_MATCHES"
+        fi
+
+        # Check for 9-digit BSN numbers with 11-proof validation
+        echo "Checking for BSN numbers..."
+        BSN_VIOLATION_COUNT=0
+        while IFS= read -r line; do
+          [[ -z "$line" ]] && continue
+          # Extract file:line:content
+          file="${line%%:*}"
+          rest="${line#*:}"
+          linenum="${rest%%:*}"
+          content="${rest#*:}"
+          
+          # Find all 9-digit numbers in this line and validate each
+          for candidate in $(echo "$content" | grep -oE '\b[0-9]{9}\b' || true); do
+            if is_valid_bsn "$candidate"; then
+              BSN_VIOLATION_COUNT=$((BSN_VIOLATION_COUNT + 1))
+              add_violation "$file" "$linenum" "bsn"
+            fi
+          done
+        done < <(rg -n --glob '!*.md' '\b[0-9]{9}\b' . 2>/dev/null | head -100 || true)
+
+        if [[ $BSN_VIOLATION_COUNT -gt 0 ]]; then
+          echo "::error::Found $BSN_VIOLATION_COUNT valid BSN number(s) (passed 11-proof)"
+          VIOLATIONS_FOUND=1
+          STATUS="fail"
+          VIOLATION_TYPES="${VIOLATION_TYPES}bsn,"
         fi
 
         # Check for first names + capitalized word (potential full names)
         echo "Checking for first names..."
-        FIRSTNAME_MATCHES_RAW=$(rg -n --glob '!*.md' --pcre2 "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" . 2>/dev/null || true)
+        FIRSTNAME_MATCHES_RAW=$(rg -n --glob '!*.md' --pcre2 "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" . 2>/dev/null | head -50 || true)
         FIRSTNAME_MATCHES=$(echo "$FIRSTNAME_MATCHES_RAW" | rg --pcre2 -v "($STREET_SUFFIXES)" 2>/dev/null || true)
         if [[ -n "$FIRSTNAME_MATCHES" ]]; then
           echo "::error::Found potential full names (first name pattern)"
-          echo "$FIRSTNAME_MATCHES" | head -10
+          echo "$FIRSTNAME_MATCHES" | head -5
           VIOLATIONS_FOUND=1
-          VIOLATION_DETAILS="${VIOLATION_DETAILS}Full names (first name pattern) found\n"
+          STATUS="fail"
+          VIOLATION_TYPES="${VIOLATION_TYPES}fullname_firstname,"
+          
+          # Extract file:line for telemetry
+          while IFS=: read -r file linenum _; do
+            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "fullname"
+          done <<< "$FIRSTNAME_MATCHES"
         fi
 
         # Check for capitalized word + surname (potential full names)
         echo "Checking for surnames..."
-        SURNAME_MATCHES_RAW=$(rg -n --glob '!*.md' --pcre2 "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" . 2>/dev/null || true)
+        SURNAME_MATCHES_RAW=$(rg -n --glob '!*.md' --pcre2 "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" . 2>/dev/null | head -50 || true)
         SURNAME_MATCHES=$(echo "$SURNAME_MATCHES_RAW" | rg --pcre2 -v "($STREET_SUFFIXES)" 2>/dev/null || true)
         if [[ -n "$SURNAME_MATCHES" ]]; then
           echo "::error::Found potential full names (surname pattern)"
-          echo "$SURNAME_MATCHES" | head -10
+          echo "$SURNAME_MATCHES" | head -5
           VIOLATIONS_FOUND=1
-          VIOLATION_DETAILS="${VIOLATION_DETAILS}Full names (surname pattern) found\n"
+          STATUS="fail"
+          VIOLATION_TYPES="${VIOLATION_TYPES}fullname_surname,"
+          
+          # Extract file:line for telemetry
+          while IFS=: read -r file linenum _; do
+            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "fullname"
+          done <<< "$SURNAME_MATCHES"
         fi
 
         # Check for addresses (known streets + number)
         echo "Checking for addresses..."
-        ADDRESS_MATCHES=$(rg -n --glob '!*.md' -i "($ALL_STREETS)[[:space:]]+[0-9]" . 2>/dev/null || true)
+        ADDRESS_MATCHES=$(rg -n --glob '!*.md' -i "($ALL_STREETS)[[:space:]]+[0-9]" . 2>/dev/null | head -20 || true)
         if [[ -n "$ADDRESS_MATCHES" ]]; then
           echo "::error::Found addresses (known streets)"
-          echo "$ADDRESS_MATCHES" | head -10
+          echo "$ADDRESS_MATCHES" | head -5
           VIOLATIONS_FOUND=1
-          VIOLATION_DETAILS="${VIOLATION_DETAILS}Addresses found\n"
+          STATUS="fail"
+          VIOLATION_TYPES="${VIOLATION_TYPES}address_known,"
+          
+          # Extract file:line for telemetry
+          while IFS=: read -r file linenum _; do
+            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "address"
+          done <<< "$ADDRESS_MATCHES"
         fi
 
         # Check for street pattern + number
-        STREET_PATTERN_MATCHES=$(rg -n --glob '!*.md' "\b[A-Z][a-z]{4,}($STREET_SUFFIXES)[[:space:]]+[0-9]" . 2>/dev/null || true)
+        echo "Checking for street patterns..."
+        STREET_PATTERN_MATCHES=$(rg -n --glob '!*.md' "\b[A-Z][a-z]{4,}($STREET_SUFFIXES)[[:space:]]+[0-9]" . 2>/dev/null | head -20 || true)
         if [[ -n "$STREET_PATTERN_MATCHES" ]]; then
           echo "::error::Found addresses (street pattern)"
-          echo "$STREET_PATTERN_MATCHES" | head -10
+          echo "$STREET_PATTERN_MATCHES" | head -5
           VIOLATIONS_FOUND=1
-          VIOLATION_DETAILS="${VIOLATION_DETAILS}Addresses (pattern) found\n"
+          STATUS="fail"
+          VIOLATION_TYPES="${VIOLATION_TYPES}address_pattern,"
+          
+          # Extract file:line for telemetry
+          while IFS=: read -r file linenum _; do
+            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "address"
+          done <<< "$STREET_PATTERN_MATCHES"
         fi
 
-        # Set output
-        echo "violations_found=$VIOLATIONS_FOUND" >> $GITHUB_OUTPUT
-        echo "violation_details<<EOF" >> $GITHUB_OUTPUT
-        echo -e "$VIOLATION_DETAILS" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
+        # Remove trailing comma from violation types
+        VIOLATION_TYPES=$(echo "$VIOLATION_TYPES" | sed 's/,$//')
+
+        # Read and deduplicate violation details, limit to 50 entries
+        VIOLATION_DETAILS=$(jq -c 'unique | .[0:50]' "$DETAILS_FILE")
+        rm -f "$DETAILS_FILE"
+
+        # Set outputs (do NOT exit here - let telemetry run first)
+        echo "status=${STATUS}" >> $GITHUB_OUTPUT
+        echo "violations_found=${VIOLATIONS_FOUND}" >> $GITHUB_OUTPUT
+        echo "violation_types=${VIOLATION_TYPES}" >> $GITHUB_OUTPUT
+        echo "violation_details=${VIOLATION_DETAILS}" >> $GITHUB_OUTPUT
 
         if [[ $VIOLATIONS_FOUND -eq 1 ]]; then
-          echo "❌ Personal information detected!"
-          exit 1
+          echo ""
+          echo "Personal information detected - will fail after telemetry"
+          echo "Violations: $(echo "$VIOLATION_DETAILS" | jq 'length') locations"
         else
-          echo "✅ No personal information detected"
-          exit 0
+          echo ""
+          echo "No personal information detected"
         fi
 
     - name: Send telemetry via repository dispatch
-      if: steps.scan.outputs.violations_found == '1' && inputs.telemetry-pat != '' && inputs.telemetry-repo != ''
-      shell: bash
-      run: |
-        # Save violations for telemetry
-        echo "${{ steps.scan.outputs.violations_found }}" > violations_found.txt
-        echo "${{ steps.scan.outputs.violation_details }}" > violation_details.txt
-
-    - name: Send telemetry via repository dispatch
-      if: always() && inputs.telemetry-pat != '' && inputs.telemetry-repo != ''
+      if: ${{ inputs.telemetry-pat != '' && steps.scan.outputs.status == 'fail' }}
       uses: actions/github-script@v7
       env:
+        STATUS: ${{ steps.scan.outputs.status }}
         VIOLATIONS_FOUND: ${{ steps.scan.outputs.violations_found }}
+        VIOLATION_TYPES: ${{ steps.scan.outputs.violation_types }}
         VIOLATION_DETAILS: ${{ steps.scan.outputs.violation_details }}
         TELEMETRY_REPO: ${{ inputs.telemetry-repo }}
       with:
         github-token: ${{ inputs.telemetry-pat }}
         script: |
-          const fs = require('fs');
-
-          // Read violation details
-          let violationsFound = '0';
-          let violationDetails = '';
-
-          try {
-            violationsFound = fs.readFileSync('violations_found.txt', 'utf8').trim();
-            violationDetails = fs.readFileSync('violation_details.txt', 'utf8').trim();
-          } catch (e) {
-            console.log('Could not read violation files:', e.message);
-          }
-
           const [owner, repo] = process.env.TELEMETRY_REPO.split('/');
+
+          let violationDetails = [];
+          try {
+            violationDetails = JSON.parse(process.env.VIOLATION_DETAILS || '[]');
+          } catch (e) {
+            console.log('Warning: Could not parse violation details');
+          }
 
           await github.rest.repos.createDispatchEvent({
             owner: owner,
@@ -182,16 +276,38 @@ runs:
               sha: process.env.GITHUB_SHA,
               ref: process.env.GITHUB_REF,
               actor: process.env.GITHUB_ACTOR,
-              violations_found: violationsFound,
+              status: process.env.STATUS,
+              violations_found: parseInt(process.env.VIOLATIONS_FOUND),
+              violation_types: process.env.VIOLATION_TYPES.split(',').filter(t => t),
               violation_details: violationDetails,
               timestamp: new Date().toISOString()
             }
           });
 
           console.log('Telemetry sent to ' + process.env.TELEMETRY_REPO);
+          console.log('Violation details: ' + violationDetails.length + ' locations');
 
     - name: No telemetry configured
-      if: inputs.telemetry-pat == ''
+      if: ${{ inputs.telemetry-pat == '' }}
       shell: bash
       run: |
         echo "No telemetry-pat configured; skipping telemetry."
+
+    - name: Fail if personal information detected
+      if: ${{ steps.scan.outputs.status == 'fail' }}
+      shell: bash
+      run: |
+        echo ""
+        echo "=========================================="
+        echo "ERROR: Personal information detected!"
+        echo "=========================================="
+        echo ""
+        echo "Violation types: ${{ steps.scan.outputs.violation_types }}"
+        echo ""
+        echo "Personal information was detected in repository files."
+        echo "This may include patient IDs, BSN numbers, names, or addresses."
+        echo ""
+        echo "These must be removed before the code can be pushed."
+        echo "See: https://github.com/AmsterdamUMC/org-security-workflows#remediation"
+        echo ""
+        exit 1

@@ -21,7 +21,11 @@ runs:
     - name: Download central gitignore
       shell: bash
       run: |
-        curl -sL "${{ inputs.rules-url }}" -o central-gitignore.txt
+        HTTP_STATUS=$(curl -sL -w "%{http_code}" "${{ inputs.rules-url }}" -o central-gitignore.txt)
+        if [[ "$HTTP_STATUS" != "200" ]]; then
+          echo "::error::Failed to fetch central-gitignore.txt (HTTP $HTTP_STATUS)"
+          exit 1
+        fi
 
     - name: Extract FORBIDDEN patterns
       shell: bash

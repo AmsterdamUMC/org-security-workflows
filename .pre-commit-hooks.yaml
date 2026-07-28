@@ -14,6 +14,22 @@
   types: [text]
   pass_filenames: true
 
+- id: check-forbidden-filetypes-prepush
+  name: Check forbidden file types (pre-push)
+  entry: pre-push-check/check-filetypes-prepush.py
+  language: script
+  stages: [pre-push]
+  always_run: true
+  pass_filenames: false
+
+- id: check-personal-info-prepush
+  name: Check for personal information before push
+  entry: pre-push-check/check-personal-info-prepush.py
+  language: script
+  stages: [pre-push]
+  always_run: true
+  pass_filenames: false
+
 # Bash versions (legacy, for backwards compatibility)
 - id: check-forbidden-filetypes-bash
   name: Check for forbidden file types (bash)
@@ -31,16 +47,16 @@
   types: [text]
   pass_filenames: true
 
-- id: check-forbidden-filetypes-prepush
-  name: Check forbidden file types (pre-push)
+- id: check-forbidden-filetypes-prepush-bash
+  name: Check forbidden file types (pre-push, bash)
   entry: pre-push-check/check-filetypes-prepush.sh
   language: script
   stages: [pre-push]
   always_run: true
   pass_filenames: false
 
-- id: check-personal-info-prepush
-  name: Check for personal information before push
+- id: check-personal-info-prepush-bash
+  name: Check for personal information before push (bash)
   entry: pre-push-check/check-personal-info-prepush.sh
   language: script
   stages: [pre-push]
