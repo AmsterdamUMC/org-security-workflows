@@ -70,12 +70,20 @@ def build_patterns(firstnames, surnames, streetnames) -> dict:
     alternations, since the reference lists are large (10k-150k entries)
     and a single alternation-based regex over that many strings would be
     far too slow to run on every commit.
+
+    Firstnames are single tokens (hyphenated forms like "Jan-Willem" are
+    handled by word_token's character class, so no n-gram grouping is
+    needed there). Surnames and street names can be multi-word (e.g.
+    "ter Hart", "van der Berg", "Van Gogh straat"), so both are grouped
+    by word count for n-gram sliding-window matching.
     """
     firstnames_set = {n.lower() for n in firstnames}
-    surnames_set = {n.lower() for n in surnames}
 
-    # Street names can be multi-word (e.g. "Van Gogh straat"), so group
-    # them by word count for n-gram sliding-window matching.
+    surname_ngrams: dict[int, set[str]] = {}
+    for s in surnames:
+        words = s.split()
+        surname_ngrams.setdefault(len(words), set()).add(s.lower())
+
     street_ngrams: dict[int, set[str]] = {}
     for s in streetnames:
         words = s.split()
@@ -85,11 +93,28 @@ def build_patterns(firstnames, surnames, streetnames) -> dict:
         "patient_id": re.compile(r"\b([0-9]{7})\b"),
         "bsn": re.compile(r"\b([0-9]{9})\b"),
         "firstnames": firstnames_set,
-        "surnames": surnames_set,
+        "surname_ngrams": surname_ngrams,
         "street_ngrams": street_ngrams,
         "street_suffix_filter": re.compile(STREET_SUFFIXES, re.IGNORECASE),
         "word_token": re.compile(r"[A-Za-z][a-zA-Z'-]*"),
     }
+
+
+def _phrase_at(tokens, line, start, n):
+    """
+    Return the lowercase phrase formed by tokens[start:start+n] if all of
+    those tokens are mutually adjacent (only whitespace between them),
+    otherwise return None.
+    """
+    if start < 0 or start + n > len(tokens):
+        return None
+    for i in range(start, start + n - 1):
+        w1, pos1 = tokens[i]
+        w2, pos2 = tokens[i + 1]
+        gap = line[pos1 + len(w1):pos2]
+        if gap.strip():
+            return None
+    return " ".join(t[0].lower() for t in tokens[start:start + n])
 
 
 def check_file_for_personal_info(
@@ -116,6 +141,9 @@ def check_file_for_personal_info(
     except (IOError, OSError):
         return violations
 
+    surname_lens = sorted(patterns["surname_ngrams"], reverse=True)
+    street_lens = sorted(patterns["street_ngrams"], reverse=True)
+
     for line_num, line in enumerate(lines, 1):
         line_stripped = line.rstrip()
 
@@ -130,23 +158,33 @@ def check_file_for_personal_info(
 
         tokens = [(m.group(0), m.start()) for m in patterns["word_token"].finditer(line_stripped)]
 
-        # --- Full name check: adjacent firstname + surname pair (case-insensitive) ---
+        # --- Full name check: firstname adjacent to a (possibly multi-word) surname ---
         found_name = False
-        for i in range(len(tokens) - 1):
-            w1, pos1 = tokens[i]
-            w2, pos2 = tokens[i + 1]
-            gap = line_stripped[pos1 + len(w1):pos2]
-            if gap.strip():  # must be adjacent, only whitespace between the two words
+        for i, (w, pos) in enumerate(tokens):
+            if w.lower() not in patterns["firstnames"]:
                 continue
-            w1_l, w2_l = w1.lower(), w2.lower()
-            # Require BOTH sides to hit a lexicon (firstname->surname, or surname->firstname)
-            is_pair = (
-                (w1_l in patterns["firstnames"] and w2_l in patterns["surnames"])
-                or (w1_l in patterns["surnames"] and w2_l in patterns["firstnames"])
-            )
-            if is_pair and not patterns["street_suffix_filter"].search(line_stripped):
-                violations.append(("Full Name", line_num, line_stripped))
-                found_name = True
+
+            # firstname followed by surname, e.g. "Simon ter Hart"
+            for n in surname_lens:
+                phrase = _phrase_at(tokens, line_stripped, i + 1, n)
+                if phrase and phrase in patterns["surname_ngrams"][n]:
+                    if not patterns["street_suffix_filter"].search(line_stripped):
+                        violations.append(("Full Name", line_num, line_stripped))
+                        found_name = True
+                    break
+            if found_name:
+                break
+
+            # surname followed by firstname, e.g. "ter Hart Simon"
+            for n in surname_lens:
+                start = i - n
+                phrase = _phrase_at(tokens, line_stripped, start, n)
+                if phrase and phrase in patterns["surname_ngrams"][n]:
+                    if not patterns["street_suffix_filter"].search(line_stripped):
+                        violations.append(("Full Name", line_num, line_stripped))
+                        found_name = True
+                    break
+            if found_name:
                 break
         if found_name:
             continue
@@ -154,7 +192,7 @@ def check_file_for_personal_info(
         # --- Street name check: n-gram sliding window, longest match first ---
         words_lower = [t[0].lower() for t in tokens]
         found_street = False
-        for n in sorted(patterns["street_ngrams"], reverse=True):
+        for n in street_lens:
             candidates = patterns["street_ngrams"][n]
             for i in range(len(words_lower) - n + 1):
                 phrase = " ".join(words_lower[i:i + n])
