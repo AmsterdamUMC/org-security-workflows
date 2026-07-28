@@ -149,30 +149,32 @@ def is_valid_bsn(digits: str) -> bool:
 
 
 def build_patterns(firstnames, surnames, streetnames) -> dict:
-    firstnames_pattern = (
-        r"\b(" + "|".join(re.escape(n) for n in firstnames) + r")\b"
-    )
-    surnames_pattern = (
-        r"\b(" + "|".join(re.escape(n) for n in surnames) + r")\b"
-    )
-    streetnames_pattern = (
-        r"(" + "|".join(re.escape(s) for s in streetnames) + r")"
-    )
+    """
+    Build lookup structures for personal-info detection.
+
+    Names use set membership (O(1) lookup) instead of giant regex
+    alternations, since the reference lists are large (10k-150k entries)
+    and a single alternation-based regex over that many strings would be
+    far too slow to run on every push.
+    """
+    firstnames_set = {n.lower() for n in firstnames}
+    surnames_set = {n.lower() for n in surnames}
+
+    # Street names can be multi-word (e.g. "Van Gogh straat"), so group
+    # them by word count for n-gram sliding-window matching.
+    street_ngrams: dict[int, set[str]] = {}
+    for s in streetnames:
+        words = s.split()
+        street_ngrams.setdefault(len(words), set()).add(s.lower())
 
     return {
         "patient_id": re.compile(r"\b([0-9]{7})\b"),
         "bsn": re.compile(r"\b([0-9]{9})\b"),
-        "firstname_fullname": re.compile(
-            firstnames_pattern + r"\s+[A-Z][a-z]{2,}"
-        ),
-        "surname_fullname": re.compile(r"[A-Z][a-z]{2,}\s+" + surnames_pattern),
-        "street_with_number": re.compile(
-            streetnames_pattern + r"\s+[0-9]", re.IGNORECASE
-        ),
-        "street_suffix": re.compile(
-            r"\b[A-Z][a-z]{4,}(" + STREET_SUFFIXES + r")\s+[0-9]"
-        ),
+        "firstnames": firstnames_set,
+        "surnames": surnames_set,
+        "street_ngrams": street_ngrams,
         "street_suffix_filter": re.compile(STREET_SUFFIXES, re.IGNORECASE),
+        "word_token": re.compile(r"[A-Za-z][a-zA-Z'-]*"),
     }
 
 
@@ -206,22 +208,48 @@ def check_file_for_personal_info(
             violations.append(("BSN", line_num, line_stripped))
             continue
 
-        match = patterns["firstname_fullname"].search(line_stripped)
-        if match and not patterns["street_suffix_filter"].search(line_stripped):
-            violations.append(("Full Name", line_num, line_stripped))
+        tokens = [(m.group(0), m.start()) for m in patterns["word_token"].finditer(line_stripped)]
+
+        # --- Full name check: adjacent firstname + surname pair (case-insensitive) ---
+        found_name = False
+        for i in range(len(tokens) - 1):
+            w1, pos1 = tokens[i]
+            w2, pos2 = tokens[i + 1]
+            gap = line_stripped[pos1 + len(w1):pos2]
+            if gap.strip():  # must be adjacent, only whitespace between the two words
+                continue
+            w1_l, w2_l = w1.lower(), w2.lower()
+            # Require BOTH sides to hit a lexicon (firstname->surname, or surname->firstname)
+            is_pair = (
+                (w1_l in patterns["firstnames"] and w2_l in patterns["surnames"])
+                or (w1_l in patterns["surnames"] and w2_l in patterns["firstnames"])
+            )
+            if is_pair and not patterns["street_suffix_filter"].search(line_stripped):
+                violations.append(("Full Name", line_num, line_stripped))
+                found_name = True
+                break
+        if found_name:
             continue
 
-        match = patterns["surname_fullname"].search(line_stripped)
-        if match and not patterns["street_suffix_filter"].search(line_stripped):
-            violations.append(("Full Name", line_num, line_stripped))
-            continue
-
-        if patterns["street_with_number"].search(line_stripped):
-            violations.append(("Address", line_num, line_stripped))
-            continue
-
-        if patterns["street_suffix"].search(line_stripped):
-            violations.append(("Address", line_num, line_stripped))
+        # --- Street name check: n-gram sliding window, longest match first ---
+        words_lower = [t[0].lower() for t in tokens]
+        found_street = False
+        for n in sorted(patterns["street_ngrams"], reverse=True):
+            candidates = patterns["street_ngrams"][n]
+            for i in range(len(words_lower) - n + 1):
+                phrase = " ".join(words_lower[i:i + n])
+                if phrase in candidates:
+                    end_pos = tokens[i + n - 1][1] + len(tokens[i + n - 1][0])
+                    tail = line_stripped[end_pos:end_pos + 6]
+                    if re.match(r"\s+\d", tail):
+                        violations.append(("Address", line_num, line_stripped))
+                    else:
+                        violations.append(("Address (no number)", line_num, line_stripped))
+                    found_street = True
+                    break
+            if found_street:
+                break
+        if found_street:
             continue
 
     return violations
