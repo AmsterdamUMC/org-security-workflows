@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from personal-info import build_patterns, check_file_for_personal_info, load_reference_file
+from personal_info import build_patterns, check_file_for_personal_info, load_reference_file
 
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(
