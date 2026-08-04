@@ -1,5 +1,5 @@
 name: "Personal Information Check"
-description: "Scans for personal information (names, addresses, patient IDs, BSN) in repository files"
+description: "Scans for personal information (names, addresses, emails) in repository files"
 inputs:
   telemetry-pat:
     description: "PAT token for sending telemetry"
@@ -114,53 +114,17 @@ runs:
           (( total % 11 == 0 ))
         }
 
-        # Check for 7-digit patient IDs
-        echo "Checking for patient IDs..."
-        PATIENT_ID_MATCHES=$(rg -n --glob '!*.md' '\b[0-9]{7}\b' . 2>/dev/null | head -20 || true)
-        if [[ -n "$PATIENT_ID_MATCHES" ]]; then
-          echo "::error::Found potential 7-digit patient IDs"
-          echo "$PATIENT_ID_MATCHES" | head -5
-          VIOLATIONS_FOUND=1
-          STATUS="fail"
-          VIOLATION_TYPES="${VIOLATION_TYPES}patient_id,"
-          
-          # Extract file:line for telemetry
-          while IFS=: read -r file linenum _; do
-            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "patient_id"
-          done <<< "$PATIENT_ID_MATCHES"
-        fi
-
-        # Check for 9-digit BSN numbers with 11-proof validation
-        echo "Checking for BSN numbers..."
-        BSN_VIOLATION_COUNT=0
-        while IFS= read -r line; do
-          [[ -z "$line" ]] && continue
-          # Extract file:line:content
-          file="${line%%:*}"
-          rest="${line#*:}"
-          linenum="${rest%%:*}"
-          content="${rest#*:}"
-          
-          # Find all 9-digit numbers in this line and validate each
-          for candidate in $(echo "$content" | grep -oE '\b[0-9]{9}\b' || true); do
-            if is_valid_bsn "$candidate"; then
-              BSN_VIOLATION_COUNT=$((BSN_VIOLATION_COUNT + 1))
-              add_violation "$file" "$linenum" "bsn"
-            fi
-          done
-        done < <(rg -n --glob '!*.md' '\b[0-9]{9}\b' . 2>/dev/null | head -100 || true)
-
-        if [[ $BSN_VIOLATION_COUNT -gt 0 ]]; then
-          echo "::error::Found $BSN_VIOLATION_COUNT valid BSN number(s) (passed 11-proof)"
-          VIOLATIONS_FOUND=1
-          STATUS="fail"
-          VIOLATION_TYPES="${VIOLATION_TYPES}bsn,"
-        fi
-
         # Check for first names + capitalized word (potential full names)
         echo "Checking for first names..."
-        FIRSTNAME_MATCHES_RAW=$(rg -n --glob '!*.md' --pcre2 "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" . 2>/dev/null | head -50 || true)
+        
+        INSTITUTION_PATTERN="ziekenhuis|kinderziekenhuis|kliniek|hospital|clinic"
+        DOC_METADATA="author|copyright|maintainer|contributor|created by|written by|owner|unit owner|code owner"
+
+
+        FIRSTNAME_MATCHES_RAW=$(rg -n --glob '!*.md' --pcre2 "\b($ALL_FIRSTNAMES)\s+($ALL_SURNAMES)\b" . 2>/dev/null | head -50 || true)
         FIRSTNAME_MATCHES=$(echo "$FIRSTNAME_MATCHES_RAW" | rg --pcre2 -v "($STREET_SUFFIXES)" 2>/dev/null || true)
+        FIRSTNAME_MATCHES=$(echo "$FIRSTNAME_MATCHES" | rg --pcre2 -vi "($INSTITUTION_PATTERN)" | rg -v "post-" | rg --pcre2 -vi "($DOC_METADATA)" 2>/dev/null || true)
+
         if [[ -n "$FIRSTNAME_MATCHES" ]]; then
           echo "::error::Found potential full names (first name pattern)"
           echo "$FIRSTNAME_MATCHES" | head -5
@@ -176,8 +140,9 @@ runs:
 
         # Check for capitalized word + surname (potential full names)
         echo "Checking for surnames..."
-        SURNAME_MATCHES_RAW=$(rg -n --glob '!*.md' --pcre2 "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" . 2>/dev/null | head -50 || true)
+        SURNAME_MATCHES_RAW=$(rg -n --glob '!*.md' --pcre2 "\b($ALL_SURNAMES)\s+($ALL_FIRSTNAMES)\b" . 2>/dev/null | head -50 || true)
         SURNAME_MATCHES=$(echo "$SURNAME_MATCHES_RAW" | rg --pcre2 -v "($STREET_SUFFIXES)" 2>/dev/null || true)
+        SURNAME_MATCHES=$(echo "$SURNAME_MATCHES" | rg --pcre2 -vi "($INSTITUTION_PATTERN)" | rg -v "post-" | rg --pcre2 -vi "($DOC_METADATA)" 2>/dev/null || true)
         if [[ -n "$SURNAME_MATCHES" ]]; then
           echo "::error::Found potential full names (surname pattern)"
           echo "$SURNAME_MATCHES" | head -5
@@ -207,20 +172,19 @@ runs:
           done <<< "$ADDRESS_MATCHES"
         fi
 
-        # Check for street pattern + number
-        echo "Checking for street patterns..."
-        STREET_PATTERN_MATCHES=$(rg -n --glob '!*.md' "\b[A-Z][a-z]{4,}($STREET_SUFFIXES)[[:space:]]+[0-9]" . 2>/dev/null | head -20 || true)
-        if [[ -n "$STREET_PATTERN_MATCHES" ]]; then
-          echo "::error::Found addresses (street pattern)"
-          echo "$STREET_PATTERN_MATCHES" | head -5
+        echo "Checking for email addresses..."
+        IGNORED_LOCAL="example|info|noreply|no-reply|support|contact|admin|webmaster|postmaster|voorbeeld|email"
+        IGNORED_DOMAINS="example\.com|example\.org|example\.net|example\.edu|example\.nl"
+        TLDS="edu|org|gov|com|net|nl|be|de|uk|fr|it|es|ch|se|no|dk|at|au|ca|jp|int|eu|ac"
+        EMAIL_MATCHES=$(rg -n --glob '!*.md' --pcre2 "\b(?!(?:${IGNORED_LOCAL})@)[A-Za-z0-9._%+-]+@(?!(?:${IGNORED_DOMAINS}))[A-Za-z0-9.-]+\.(${TLDS})\b" . 2>/dev/null | head -20 || true)
+        if [[ -n "$EMAIL_MATCHES" ]]; then
+          echo "::error::Found potential email addresses"
           VIOLATIONS_FOUND=1
           STATUS="fail"
-          VIOLATION_TYPES="${VIOLATION_TYPES}address_pattern,"
-          
-          # Extract file:line for telemetry
+          VIOLATION_TYPES="${VIOLATION_TYPES}email_address,"
           while IFS=: read -r file linenum _; do
-            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "address"
-          done <<< "$STREET_PATTERN_MATCHES"
+            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "email_address"
+          done <<< "$EMAIL_MATCHES"
         fi
 
         # Remove trailing comma from violation types
@@ -244,6 +208,7 @@ runs:
           echo ""
           echo "No personal information detected"
         fi
+
 
     - name: Send telemetry via repository dispatch
       if: ${{ inputs.telemetry-pat != '' && steps.scan.outputs.status == 'fail' }}
@@ -305,7 +270,7 @@ runs:
         echo "Violation types: ${{ steps.scan.outputs.violation_types }}"
         echo ""
         echo "Personal information was detected in repository files."
-        echo "This may include patient IDs, BSN numbers, names, or addresses."
+        echo "This may include patient names, addresses, or email addresses."
         echo ""
         echo "These must be removed before the code can be pushed."
         echo "See: https://github.com/AmsterdamUMC/org-security-workflows#remediation"

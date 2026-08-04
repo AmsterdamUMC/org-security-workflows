@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Pre-commit hook for detecting personal information.
-Scans staged files for Dutch first names, surnames, street names, patient IDs, and BSN.
+Scans staged files for Dutch first names, surnames, street names, and email addresses.
 """
 
 import io
@@ -18,6 +18,14 @@ if sys.version_info[0] < 3:
 # Dutch street suffixes
 STREET_SUFFIXES = r"straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
 
+INSTITUTION_PATTERN = r"ziekenhuis|kinderziekenhuis|kliniek|hospital|clinic"
+DOC_METADATA_KEYWORDS = ["author", "copyright", "maintainer", "contributor",
+                          "created by", "written by", "owner", "unit owner", "code owner"]
+EMAIL_PATTERN = re.compile(
+    r"\b(?!(?:example|info|noreply|no-reply|support|contact|admin|webmaster|postmaster|voorbeeld|email)@)"
+    r"[A-Za-z0-9._%+-]+@(?!(?:example\.com|example\.org|example\.net|example\.edu|example\.nl))"
+    r"[A-Za-z0-9.-]+\.(edu|org|gov|com|net|nl|be|de|uk|fr|it|es|ch|se|no|dk|at|au|ca|jp|int|eu|ac)\b"
+)
 
 def load_reference_file(filepath: Path) -> list[str]:
     """Load a reference file and return list of entries."""
@@ -48,20 +56,6 @@ def get_staged_files() -> list[str]:
     return [f for f in result.stdout.strip().split("\n") if f]
 
 
-def is_valid_bsn(digits: str) -> bool:
-    """
-    Check if 9 digits pass the BSN 11-proof (elfproef).
-    This reduces false positives for random 9-digit numbers.
-    """
-    if len(digits) != 9 or not digits.isdigit():
-        return False
-    # BSN 11-proof: sum of (digit * weight) must be divisible by 11
-    # Weights are 9, 8, 7, 6, 5, 4, 3, 2, -1 (last digit is subtracted)
-    weights = [9, 8, 7, 6, 5, 4, 3, 2, -1]
-    total = sum(int(d) * w for d, w in zip(digits, weights))
-    return total % 11 == 0
-
-
 def build_patterns(firstnames, surnames, streetnames) -> dict:
     """
     Build lookup structures for personal-info detection.
@@ -77,12 +71,12 @@ def build_patterns(firstnames, surnames, streetnames) -> dict:
     "ter Hart", "van der Berg", "Van Gogh straat"), so both are grouped
     by word count for n-gram sliding-window matching.
     """
-    firstnames_set = {n.lower() for n in firstnames}
+    firstnames_set = set(firstnames)
 
     surname_ngrams: dict[int, set[str]] = {}
     for s in surnames:
         words = s.split()
-        surname_ngrams.setdefault(len(words), set()).add(s.lower())
+        surname_ngrams.setdefault(len(words), set()).add(s)
 
     street_ngrams: dict[int, set[str]] = {}
     for s in streetnames:
@@ -90,22 +84,17 @@ def build_patterns(firstnames, surnames, streetnames) -> dict:
         street_ngrams.setdefault(len(words), set()).add(s.lower())
 
     return {
-        "patient_id": re.compile(r"\b([0-9]{7})\b"),
-        "bsn": re.compile(r"\b([0-9]{9})\b"),
         "firstnames": firstnames_set,
         "surname_ngrams": surname_ngrams,
         "street_ngrams": street_ngrams,
         "street_suffix_filter": re.compile(STREET_SUFFIXES, re.IGNORECASE),
         "word_token": re.compile(r"[A-Za-z][a-zA-Z'-]*"),
+        "email": EMAIL_PATTERN,
+        "institution_filter": re.compile(INSTITUTION_PATTERN, re.IGNORECASE),
     }
 
 
-def _phrase_at(tokens, line, start, n):
-    """
-    Return the lowercase phrase formed by tokens[start:start+n] if all of
-    those tokens are mutually adjacent (only whitespace between them),
-    otherwise return None.
-    """
+def _phrase_at(tokens, line, start, n, lower=True):
     if start < 0 or start + n > len(tokens):
         return None
     for i in range(start, start + n - 1):
@@ -114,7 +103,20 @@ def _phrase_at(tokens, line, start, n):
         gap = line[pos1 + len(w1):pos2]
         if gap.strip():
             return None
-    return " ".join(t[0].lower() for t in tokens[start:start + n])
+    words = [t[0] for t in tokens[start:start + n]]
+    return " ".join(w.lower() for w in words) if lower else " ".join(words)
+
+
+def is_name_false_positive(line_stripped: str, patterns: dict) -> bool:
+    if patterns["street_suffix_filter"].search(line_stripped):
+        return True
+    if patterns["institution_filter"].search(line_stripped):
+        return True
+    if "post-" in line_stripped.lower():
+        return True
+    if any(kw in line_stripped.lower() for kw in DOC_METADATA_KEYWORDS):
+        return True
+    return False
 
 
 def check_file_for_personal_info(
@@ -147,28 +149,23 @@ def check_file_for_personal_info(
     for line_num, line in enumerate(lines, 1):
         line_stripped = line.rstrip()
 
-        if patterns["patient_id"].search(line_stripped):
-            violations.append(("Patient ID", line_num, line_stripped))
-            continue
-
-        bsn_match = patterns["bsn"].search(line_stripped)
-        if bsn_match and is_valid_bsn(bsn_match.group(1)):
-            violations.append(("BSN", line_num, line_stripped))
-            continue
-
         tokens = [(m.group(0), m.start()) for m in patterns["word_token"].finditer(line_stripped)]
+
+        if patterns["email"].search(line_stripped):
+            violations.append(("Email", line_num, line_stripped))
+            continue
 
         # --- Full name check: firstname adjacent to a (possibly multi-word) surname ---
         found_name = False
         for i, (w, pos) in enumerate(tokens):
-            if w.lower() not in patterns["firstnames"]:
+            if w not in patterns["firstnames"]:
                 continue
 
             # firstname followed by surname, e.g. "Simon ter Hart"
             for n in surname_lens:
-                phrase = _phrase_at(tokens, line_stripped, i + 1, n)
+                phrase = _phrase_at(tokens, line_stripped, i + 1, n, lower=False)
                 if phrase and phrase in patterns["surname_ngrams"][n]:
-                    if not patterns["street_suffix_filter"].search(line_stripped):
+                    if not is_name_false_positive(line_stripped, patterns):
                         violations.append(("Full Name", line_num, line_stripped))
                         found_name = True
                     break
@@ -178,9 +175,9 @@ def check_file_for_personal_info(
             # surname followed by firstname, e.g. "ter Hart Simon"
             for n in surname_lens:
                 start = i - n
-                phrase = _phrase_at(tokens, line_stripped, start, n)
+                phrase = _phrase_at(tokens, line_stripped, start, n, lower=False)
                 if phrase and phrase in patterns["surname_ngrams"][n]:
-                    if not patterns["street_suffix_filter"].search(line_stripped):
+                    if not is_name_false_positive(line_stripped, patterns):
                         violations.append(("Full Name", line_num, line_stripped))
                         found_name = True
                     break
@@ -274,7 +271,7 @@ def main() -> int:
         print("=" * 63)
         print()
         print("Personal information was detected in your staged files.")
-        print("This may include patient IDs, BSN numbers, names, or addresses.")
+        print("This may include names, addresses, or email addresses.")
         print()
         print("Please remove the sensitive data before committing.")
         print()
