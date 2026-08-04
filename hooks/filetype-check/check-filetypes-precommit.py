@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from filetype_check import load_forbidden_patterns, find_blocked_files, report_blocked_files
+from filetypes import load_forbidden_patterns, find_blocked_files, report_blocked_files
 
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
