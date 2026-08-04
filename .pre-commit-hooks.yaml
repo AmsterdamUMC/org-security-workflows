@@ -1,22 +1,22 @@
 - id: check-forbidden-filetypes
   name: Check for forbidden file types
   description: Block data files that may contain sensitive information
-  entry: pre-commit-check/check-filetypes.py
+  entry: hooks/filetype-check/check-filetypes-precommit.py
   language: script
   types: [file]
   pass_filenames: true
 
 - id: check-personal-info
   name: Check for personal information
-  description: Detect Dutch names, addresses, and patient IDs
-  entry: pre-commit-check/check-personal-info.py
+  description: Detect Dutch names, addresses, and email addresses
+  entry: hooks/personal-info-check/check-personal-info-precommit.py
   language: script
   types: [text]
   pass_filenames: true
 
 - id: check-forbidden-filetypes-prepush
   name: Check forbidden file types (pre-push)
-  entry: pre-push-check/check-filetypes-prepush.py
+  entry: hooks/filetype-check/check-filetypes-prepush.py
   language: script
   stages: [pre-push]
   always_run: true
@@ -24,7 +24,7 @@
 
 - id: check-personal-info-prepush
   name: Check for personal information before push
-  entry: pre-push-check/check-personal-info-prepush.py
+  entry: hooks/personal-info-check/check-personal-info-prepush.py
   language: script
   stages: [pre-push]
   always_run: true
@@ -34,22 +34,22 @@
 - id: check-forbidden-filetypes-bash
   name: Check for forbidden file types (bash)
   description: Block data files that may contain sensitive information
-  entry: pre-commit-check/check-filetypes.sh
+  entry: hooks/filetype-check/check-filetypes-precommit.sh
   language: script
   types: [file]
   pass_filenames: true
 
 - id: check-personal-info-bash
   name: Check for personal information (bash)
-  description: Detect Dutch names, addresses, and patient IDs
-  entry: pre-commit-check/check-personal-info.sh
+  description: Detect Dutch names, addresses, and email addresses
+  entry: hooks/personal-info-check/check-personal-info-precommit.sh
   language: script
   types: [text]
   pass_filenames: true
 
 - id: check-forbidden-filetypes-prepush-bash
   name: Check forbidden file types (pre-push, bash)
-  entry: pre-push-check/check-filetypes-prepush.sh
+  entry: hooks/filetype-check/check-filetypes-prepush.sh
   language: script
   stages: [pre-push]
   always_run: true
@@ -57,7 +57,7 @@
 
 - id: check-personal-info-prepush-bash
   name: Check for personal information before push (bash)
-  entry: pre-push-check/check-personal-info-prepush.sh
+  entry: hooks/personal-info-check/check-personal-info-prepush.sh
   language: script
   stages: [pre-push]
   always_run: true
