@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/filetype_check.sh"
+source "$SCRIPT_DIR/filetypes.sh"
 
 RULES_FILE="$SCRIPT_DIR/../../central-gitignore.txt"
 
