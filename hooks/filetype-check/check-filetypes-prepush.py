@@ -15,8 +15,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from filetypes import load_forbidden_patterns, find_blocked_files, report_blocked_files
-
+from filetypes import (
+    load_forbidden_patterns, find_blocked_files, report_blocked_files,
+    report_corrupted_rules_file, MIN_EXPECTED_PATTERNS,
+)
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 if sys.version_info[0] < 3:
@@ -76,12 +78,12 @@ def main() -> int:
         print(f"[ERROR] central-gitignore.txt not found at: {rules_file}")
         return 1
 
-    blocked_patterns, exception_patterns = load_forbidden_patterns(rules_file)
+    blocked_patterns, exception_patterns, found_begin, found_end = load_forbidden_patterns(rules_file)
 
-    if not blocked_patterns:
-        print("[WARNING] No FORBIDDEN patterns found in central-gitignore.txt")
-        return 0
-
+    if not found_begin or not found_end or len(blocked_patterns) < MIN_EXPECTED_PATTERNS:
+        report_corrupted_rules_file(rules_file, found_begin, found_end, len(blocked_patterns))
+        return 1
+    
     files = get_files_to_check()
     if not files:
         return 0

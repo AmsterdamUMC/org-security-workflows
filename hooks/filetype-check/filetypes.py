@@ -7,8 +7,9 @@ logic only needs to be changed in one place.
 import fnmatch
 from pathlib import Path
 
+MIN_EXPECTED_PATTERNS = 20
 
-def load_forbidden_patterns(rules_file: Path) -> tuple[list[str], list[str]]:
+def load_forbidden_patterns(rules_file: Path) -> tuple[list[str], list[str], bool, bool]:
     """
     Extract FORBIDDEN patterns from central-gitignore.txt.
     Returns (blocked_patterns, exception_patterns).
@@ -16,21 +17,24 @@ def load_forbidden_patterns(rules_file: Path) -> tuple[list[str], list[str]]:
     blocked_patterns = []
     exception_patterns = []
     in_forbidden = False
+    found_begin = False
+    found_end = False
 
     with open(rules_file, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
 
             if line == "# BEGIN FORBIDDEN":
+                found_begin = True
                 in_forbidden = True
                 continue
             elif line == "# END FORBIDDEN":
+                found_end = True
                 in_forbidden = False
                 continue
 
             if not in_forbidden:
                 continue
-
             if not line or line.startswith("#"):
                 continue
 
@@ -39,8 +43,7 @@ def load_forbidden_patterns(rules_file: Path) -> tuple[list[str], list[str]]:
             else:
                 blocked_patterns.append(line)
 
-    return blocked_patterns, exception_patterns
-
+    return blocked_patterns, exception_patterns, found_begin, found_end
 
 def matches_pattern(filepath: str, pattern: str) -> bool:
     """Check if a filename matches a glob pattern."""
@@ -78,4 +81,20 @@ def report_blocked_files(blocked_files: list[str], bypass_command: str) -> None:
     print()
     print("If this is a false positive, contact your data steward.")
     print(f"To bypass (NOT recommended): {bypass_command}")
+    print()
+    
+
+def report_corrupted_rules_file(rules_file, found_begin, found_end, pattern_count):
+    print()
+    print("=" * 63)
+    print("  ERROR: central-gitignore.txt appears to be corrupted")
+    print("=" * 63)
+    if not found_begin:
+        print("  - Missing '# BEGIN FORBIDDEN' marker")
+    if not found_end:
+        print("  - Missing '# END FORBIDDEN' marker")
+    if found_begin and found_end and pattern_count < MIN_EXPECTED_PATTERNS:
+        print(f"  - Only {pattern_count} pattern(s) found, expected at least {MIN_EXPECTED_PATTERNS}")
+    print()
+    print("Blocking commit/push as a precaution. Contact the security team.")
     print()
