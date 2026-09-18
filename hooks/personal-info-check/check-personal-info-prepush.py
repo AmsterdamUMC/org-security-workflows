@@ -68,6 +68,13 @@ def get_files_to_check() -> list[str]:
 
 
 def main() -> int:
+    """
+    Entry point for the pre-push hook.
+    Scans files introduced by the commits about to be pushed (as
+    determined by get_files_to_check) for personal information and
+    blocks the push if any are found.
+    Returns 0 if clean, 1 if violations were found.
+    """
     # Script is in hooks/personal-info-check/, reference files are at repo root
     script_dir = Path(__file__).parent
     repo_root = script_dir.parent.parent

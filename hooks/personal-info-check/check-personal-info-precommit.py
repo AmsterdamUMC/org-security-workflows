@@ -29,6 +29,12 @@ def get_staged_files() -> list[str]:
 
 
 def main() -> int:
+    """
+    Entry point for the pre-commit hook.
+    Scans all staged (added/copied/modified) files for personal
+    information and blocks the commit if any are found.
+    Returns 0 if clean, 1 if violations were found.
+    """
     # Script is in hooks/personal-info-check/, reference files are at repo root
     script_dir = Path(__file__).parent
     repo_root = script_dir.parent.parent

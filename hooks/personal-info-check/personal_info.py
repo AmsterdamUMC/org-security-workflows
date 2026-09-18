@@ -2,7 +2,22 @@
 Shared personal-information detection logic for the pre-commit and
 pre-push hooks. Both hooks import from here so detection rules only
 need to be changed in one place.
+
+Unlike filetype-check, there is no single shared engine underneath
+(no git check-ignore equivalent): this Python module and
+personal-info.sh are two independent reimplementations of the same
+rules, one per language. If you add/change a pattern or false-positive
+rule here, mirror the change in personal-info.sh too, or the two
+hooks will silently disagree.
+
+Detection works on a per-line basis: build_patterns() compiles the
+name/street/email regexes once from the reference lists, and
+check_file_for_personal_info() scans each line of a file against
+them. Markdown files are skipped entirely because documentation
+routinely contains example names/addresses that would otherwise be
+constant false positives.
 """
+
 
 import re
 from pathlib import Path
@@ -53,6 +68,12 @@ def build_patterns(firstnames, surnames, streetnames) -> dict:
     "ter Hart", "van der Berg", "Van Gogh straat"), so both are grouped
     by word count for n-gram sliding-window matching.
 
+    Surnames are grouped by word count into `surname_ngrams` (a dict
+    keyed by n) because multi-word surnames must be matched as a
+    fixed-length phrase, not token-by-token — checking every n-gram
+    length surnames actually appear in average avoids both missing
+    multi-word names and matching partial fragments of them.
+
     Firstname/surname matching is case-sensitive; street matching is not.
     """
     firstnames_set = set(firstnames)
@@ -80,10 +101,15 @@ def build_patterns(firstnames, surnames, streetnames) -> dict:
 
 def _phrase_at(tokens, line, start, n, lower=True):
     """
-    Return the phrase formed by tokens[start:start+n] if all of those
-    tokens are mutually adjacent (only whitespace between them),
-    otherwise return None. Lowercased unless lower=False.
+    Join n consecutive tokens starting at `start` into a single
+    space-separated phrase.
+
+    Surnames can be multi-word (e.g. "van der Berg"), so matching
+    is done over sliding n-gram windows of tokens rather than single
+    tokens; this builds the phrase for one such window so it can be
+    checked against the surname list.
     """
+
     if start < 0 or start + n > len(tokens):
         return None
     for i in range(start, start + n - 1):
@@ -97,6 +123,18 @@ def _phrase_at(tokens, line, start, n, lower=True):
 
 
 def is_name_false_positive(line_stripped: str, patterns: dict) -> bool:
+    """
+    Return True if a line that matched a name pattern should be
+    excluded as a false positive.
+
+    Dutch surnames overlap heavily with ordinary words and with
+    street-name components, so a raw name match alone is too noisy.
+    A line is treated as a false positive if it also looks like a
+    street name (suffix match), an institution name, a "post-"
+    prefixed word, or a documentation/metadata line (author,
+    copyright, maintainer, etc.) — those contexts are expected to
+    contain real names legitimately.
+    """
     if patterns["street_suffix_filter"].search(line_stripped):
         return True
     if patterns["institution_filter"].search(line_stripped):
@@ -115,7 +153,14 @@ def check_file_for_personal_info(
     """
     Check a file for personal information.
     Returns list of (violation_type, line_number, content) tuples.
+
+    Markdown files are always skipped: documentation legitimately
+    contains example names, addresses, and emails, and would
+    otherwise dominate the results with false positives. Binary
+    files are skipped because pattern matching on non-text content
+    produces meaningless matches.
     """
+
     violations = []
 
     # Skip markdown files (documentation often contains example names/addresses)

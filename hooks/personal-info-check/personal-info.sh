@@ -25,6 +25,12 @@ pi_load_patterns() {
     IGNORED_DOMAINS="@(example\.(com|org|net|edu|nl))"
 }
 
+# Strips false-positive name matches from grep -n output: street
+# names, institution names, "post-" prefixed words, and doc/metadata
+# lines (author, copyright, etc.), since Dutch surnames overlap with
+# these enough to otherwise flood results with noise.
+# Mirrors is_name_false_positive() in personal_info.py — keep both in
+# sync when changing either.
 pi_filter_name_matches() {
     grep -ivE "($STREET_SUFFIXES)" \
         | grep -ivE "($INSTITUTION_PATTERN)" \
