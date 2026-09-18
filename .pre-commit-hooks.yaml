@@ -1,3 +1,7 @@
+# language: script (not language: python) means pre-commit executes
+# the file directly via its shebang rather than managing an isolated
+# interpreter. Python must be on the researcher's PATH. See the
+# maintenance guide, "Shared Detection Modules", for why.
 - id: check-forbidden-filetypes
   name: Check for forbidden file types
   description: Block data files that may contain sensitive information
@@ -30,7 +34,8 @@
   always_run: true
   pass_filenames: false
 
-# Bash versions (legacy, for backwards compatibility)
+# Legacy fallback only, for environments without Python. Not actively
+# kept at feature parity with the Python hooks going forward.
 - id: check-forbidden-filetypes-bash
   name: Check for forbidden file types (bash)
   description: Block data files that may contain sensitive information

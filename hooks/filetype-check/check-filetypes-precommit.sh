@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Pre-commit hook: checks staged files against FORBIDDEN patterns only
+#
+# This file only selects which files to check and formats hook-specific
+# messages. The actual matching logic lives in filetypes.sh.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

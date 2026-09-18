@@ -7,6 +7,16 @@ Matching is delegated to `git check-ignore`, Git's own .gitignore
 engine, rather than a hand-rolled reimplementation, so full
 .gitignore syntax (including ** and negation) works correctly.
 
+History, for context: an earlier version used fnmatch on bare
+filenames/paths, which silently dropped real .gitignore semantics
+(**, directory-only patterns, negation ordering). Before that, an
+even earlier version used git check-ignore directly but spawned one
+subprocess per file, which benchmarked roughly 125x slower once file
+counts ran into the hundreds, that slowness is why fnmatch was
+introduced in the first place. Batching the whole file list into a
+single `git check-ignore --stdin` call gets the correctness of Git's
+real engine back without the per-file subprocess cost.
+
 All files are checked in a single `git check-ignore --stdin` call,
 not one process per file, so this stays fast even on a full-tree
 check (pre-push on a new branch, or the org-wide scanner).
@@ -67,7 +77,8 @@ def extract_forbidden_block(rules_file: Path) -> tuple[str, bool, bool, int]:
 def find_blocked_files(files: list[str], forbidden_block: str) -> list[str]:
     """
     Return the subset of `files` that match the FORBIDDEN block,
-    checked in a single git check-ignore call.
+    checked in a single git check-ignore call. See the module
+    docstring for why batching and --no-index are both required.
     """
     if not files or not forbidden_block.strip():
         return []

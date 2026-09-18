@@ -3,6 +3,9 @@
 #
 # When run via pre-commit, uses PRE_COMMIT_FROM_REF and PRE_COMMIT_TO_REF
 # environment variables to determine which files to check.
+#
+# This file only selects which files to check and formats hook-specific
+# messages. The actual matching logic lives in filetypes.sh.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

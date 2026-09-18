@@ -6,6 +6,16 @@
 # engine) rather than hand-rolled glob matching, so full .gitignore
 # syntax (including ** and negation) works correctly.
 #
+# History, for context: an earlier version used fnmatch-style
+# matching on bare filenames/paths, which silently dropped real
+# .gitignore semantics (**, directory-only patterns, negation
+# ordering). Before that, an even earlier version used git
+# check-ignore directly but spawned one subprocess per file, roughly
+# 125x slower once file counts ran into the hundreds, that slowness
+# is why fnmatch was introduced in the first place. Batching the
+# whole file list into one `git check-ignore --stdin` call restores
+# correctness without the per-file subprocess cost.
+#
 # All files are checked in a single call via --stdin, not one process
 # per file, to stay fast on a full-tree check.
 #
@@ -53,7 +63,8 @@ ft_extract_forbidden_block() {
 }
 
 # Populates global BLOCKED_FILES from the given files, checked in one
-# batched git check-ignore call against $FORBIDDEN_TMPFILE.
+# batched git check-ignore call against $FORBIDDEN_TMPFILE. See the
+# file header above for why batching and --no-index are both required.
 ft_find_blocked_files() {
     BLOCKED_FILES=()
     local files=("$@")

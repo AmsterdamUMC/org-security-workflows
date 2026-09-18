@@ -3,6 +3,9 @@
 Pre-commit hook: checks staged files against FORBIDDEN patterns.
 Extracts patterns between "# BEGIN FORBIDDEN" and "# END FORBIDDEN"
 from central-gitignore.txt
+
+This file only selects which files to check and formats hook-specific
+messages. The actual matching logic lives in filetypes.py.
 """
 
 import io
