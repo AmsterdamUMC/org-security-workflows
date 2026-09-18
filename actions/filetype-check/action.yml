@@ -2,10 +2,6 @@ name: Filetype Check (FORBIDDEN patterns only)
 description: Fails if committed files match FORBIDDEN patterns from central-gitignore.txt
 
 inputs:
-  rules-url:
-    description: "URL to central-gitignore.txt"
-    required: false
-    default: "https://raw.githubusercontent.com/AmsterdamUMC/org-security-workflows/main/central-gitignore.txt"
   telemetry-pat:
     description: "PAT with repo scope for sending telemetry via repository dispatch"
     required: false
@@ -18,123 +14,15 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Download central gitignore
-      shell: bash
-      run: |
-        HTTP_STATUS=$(curl -sL -w "%{http_code}" "${{ inputs.rules-url }}" -o central-gitignore.txt)
-        if [[ "$HTTP_STATUS" != "200" ]]; then
-          echo "::error::Failed to fetch central-gitignore.txt (HTTP $HTTP_STATUS)"
-          exit 1
-        fi
-
-    - name: Extract FORBIDDEN patterns
-      shell: bash
-      run: |
-        awk '
-          /^# BEGIN FORBIDDEN/ { capture=1; next }
-          /^# END FORBIDDEN/   { capture=0; next }
-          capture && /^[^#]/ && NF { print }
-        ' central-gitignore.txt > forbidden-patterns.txt
-
-        echo "Extracted forbidden patterns:"
-        cat forbidden-patterns.txt
-
     - name: Check all tracked files
       id: check
       shell: bash
-      run: |
-        set -uo pipefail
-
-        STATUS="ok"
-        MESSAGE="no_forbidden_patterns"
-        BLOCKED=0
-        BLOCKED_FILES=()
-
-        if [[ ! -s forbidden-patterns.txt ]]; then
-          echo "No FORBIDDEN patterns found, skipping check"
-        else
-          BLOCKED_PATTERNS=()
-          EXCEPTION_PATTERNS=()
-
-          while IFS= read -r line; do
-            [[ -z "$line" ]] && continue
-            if [[ "$line" == !* ]]; then
-              EXCEPTION_PATTERNS+=("${line#!}")
-            else
-              BLOCKED_PATTERNS+=("${line}")
-            fi
-          done < forbidden-patterns.txt
-
-          matches_pattern() {
-            local file="$1"
-            local pattern="$2"
-            local basename="${file##*/}"
-
-            if [[ "$pattern" == \** ]]; then
-              [[ "$basename" == $pattern ]] && return 0
-            elif [[ "$pattern" == .* ]]; then
-              [[ "$basename" == $pattern ]] && return 0
-            elif [[ "$basename" == "$pattern" ]]; then
-              return 0
-            fi
-            return 1
-          }
-
-          while IFS= read -r FILE; do
-            is_blocked=false
-            is_exception=false
-
-            for pattern in "${BLOCKED_PATTERNS[@]}"; do
-              if matches_pattern "$FILE" "$pattern"; then
-                is_blocked=true
-                break
-              fi
-            done
-
-            if [[ "$is_blocked" == true ]]; then
-              for pattern in "${EXCEPTION_PATTERNS[@]}"; do
-                if matches_pattern "$FILE" "$pattern"; then
-                  is_exception=true
-                  break
-                fi
-              done
-            fi
-
-            if [[ "$is_blocked" == true && "$is_exception" == false ]]; then
-              echo "::error file=$FILE::Blocked by FORBIDDEN patterns in central-gitignore.txt"
-              BLOCKED_FILES+=("$FILE")
-              BLOCKED=1
-            fi
-          done < <(git ls-files)
-
-          if [[ $BLOCKED -eq 1 ]]; then
-            echo ""
-            echo "=========================================="
-            echo "ERROR: Forbidden file types detected!"
-            echo "=========================================="
-            echo "Blocked files:"
-            for f in "${BLOCKED_FILES[@]}"; do
-              echo "  - $f"
-            done
-            echo ""
-            echo "These files must be removed from the repository."
-            echo "See: https://github.com/AmsterdamUMC/org-security-workflows#remediation"
-            STATUS="fail"
-            MESSAGE="forbidden_files_found"
-          else
-            echo "No forbidden file types found."
-            STATUS="ok"
-            MESSAGE="no_forbidden_files"
-          fi
-        fi
-
-        # Export for next step
-        echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
-        echo "message=${MESSAGE}" >> "$GITHUB_OUTPUT"
-        echo "blocked=${BLOCKED}" >> "$GITHUB_OUTPUT"
-
-        # Save blocked files to a file for the next step
-        printf '%s\n' "${BLOCKED_FILES[@]}" > blocked_files.txt
+      # This action runs from a full checkout of org-security-workflows
+      # at its own ref (github.action_path points inside it), so the
+      # shared matching logic (filetypes.py) and central-gitignore.txt
+      # are already on disk here. No separate fetch, no bash
+      # reimplementation of the matching logic.
+      run: python3 "${{ github.action_path }}/filetype-check.py"
 
     - name: Send telemetry via repository dispatch
       if: ${{ inputs.telemetry-pat != '' && steps.check.outputs.status == 'fail' }}

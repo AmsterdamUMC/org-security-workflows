@@ -8,207 +8,20 @@ inputs:
     description: "Repository to send telemetry to (format: owner/repo)"
     required: false
     default: "AmsterdamUMC/security-telemetry"
-  personal-info-lists-repo:
-    description: "Repository containing personal info reference lists"
-    required: false
-    default: "amsterdamumc/org-security-workflows"
-  personal-info-lists-ref:
-    description: "Branch or tag of the reference lists repository"
-    required: false
-    default: "main"
 
 runs:
   using: "composite"
   steps:
-    - name: Install ripgrep and jq
-      shell: bash
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ripgrep jq
-
-    - name: Fetch reference lists
-      shell: bash
-      env:
-        LISTS_REPO: ${{ inputs.personal-info-lists-repo }}
-        LISTS_REF: ${{ inputs.personal-info-lists-ref }}
-      run: |
-        echo "Fetching personal info reference lists from ${LISTS_REPO}@${LISTS_REF}..."
-        mkdir -p /tmp/personal-info-lists
-        BASE_URL="https://raw.githubusercontent.com/${LISTS_REPO}/${LISTS_REF}/personal-info-lists"
-
-        curl -sL --fail "$BASE_URL/common-dutch-firstnames.txt" -o /tmp/personal-info-lists/common-dutch-firstnames.txt || {
-          echo "ERROR: Failed to fetch firstnames list"
-          exit 1
-        }
-
-        curl -sL --fail "$BASE_URL/common-dutch-surnames.txt" -o /tmp/personal-info-lists/common-dutch-surnames.txt || {
-          echo "ERROR: Failed to fetch surnames list"
-          exit 1
-        }
-
-        curl -sL --fail "$BASE_URL/common-dutch-streetnames.txt" -o /tmp/personal-info-lists/common-dutch-streetnames.txt || {
-          echo "ERROR: Failed to fetch streetnames list"
-          exit 1
-        }
-
-        echo "FIRSTNAMES_FILE=/tmp/personal-info-lists/common-dutch-firstnames.txt" >> $GITHUB_ENV
-        echo "SURNAMES_FILE=/tmp/personal-info-lists/common-dutch-surnames.txt" >> $GITHUB_ENV
-        echo "STREETNAMES_FILE=/tmp/personal-info-lists/common-dutch-streetnames.txt" >> $GITHUB_ENV
-
-        echo "Successfully fetched reference lists"
-
     - name: Scan for personal information
-      shell: bash
       id: scan
-      run: |
-        echo "Scanning repository for personal information..."
-
-        # Build patterns
-        ALL_FIRSTNAMES=$(cat "$FIRSTNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
-        ALL_SURNAMES=$(cat "$SURNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
-        ALL_STREETS=$(cat "$STREETNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
-
-        # Street suffixes (used for address detection + filtering name matches)
-        STREET_SUFFIXES="straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
-
-        STATUS="ok"
-        VIOLATIONS_FOUND=0
-        VIOLATION_TYPES=""
-
-        # Initialize violation details file for collecting JSON objects
-        DETAILS_FILE=$(mktemp)
-        echo "[]" > "$DETAILS_FILE"
-
-        # Helper function to add violation detail
-        add_violation() {
-          local file="$1"
-          local line="$2"
-          local category="$3"
-          
-          # Sanitize file path (remove leading ./)
-          file="${file#./}"
-          
-          # Add to JSON array using jq
-          jq --arg f "$file" --arg l "$line" --arg c "$category" \
-            '. += [{"file": $f, "line": ($l | tonumber), "category": $c}]' \
-            "$DETAILS_FILE" > "${DETAILS_FILE}.tmp" && mv "${DETAILS_FILE}.tmp" "$DETAILS_FILE"
-        }
-
-        # Function to validate BSN using 11-proof (elfproef)
-        is_valid_bsn() {
-          local digits="$1"
-          if [[ ${#digits} -ne 9 || ! "$digits" =~ ^[0-9]+$ ]]; then
-            return 1
-          fi
-          local total=$(( \
-            9 * ${digits:0:1} + \
-            8 * ${digits:1:1} + \
-            7 * ${digits:2:1} + \
-            6 * ${digits:3:1} + \
-            5 * ${digits:4:1} + \
-            4 * ${digits:5:1} + \
-            3 * ${digits:6:1} + \
-            2 * ${digits:7:1} - \
-            1 * ${digits:8:1} \
-          ))
-          (( total % 11 == 0 ))
-        }
-
-        # Check for first names + capitalized word (potential full names)
-        echo "Checking for first names..."
-        
-        INSTITUTION_PATTERN="ziekenhuis|kinderziekenhuis|kliniek|hospital|clinic"
-        DOC_METADATA="author|copyright|maintainer|contributor|created by|written by|owner|unit owner|code owner"
-
-
-        FIRSTNAME_MATCHES_RAW=$(rg -n --glob '!*.md' --pcre2 "\b($ALL_FIRSTNAMES)\s+($ALL_SURNAMES)\b" . 2>/dev/null | head -50 || true)
-        FIRSTNAME_MATCHES=$(echo "$FIRSTNAME_MATCHES_RAW" | rg --pcre2 -v "($STREET_SUFFIXES)" 2>/dev/null || true)
-        FIRSTNAME_MATCHES=$(echo "$FIRSTNAME_MATCHES" | rg --pcre2 -vi "($INSTITUTION_PATTERN)" | rg -v "post-" | rg --pcre2 -vi "($DOC_METADATA)" 2>/dev/null || true)
-
-        if [[ -n "$FIRSTNAME_MATCHES" ]]; then
-          echo "::error::Found potential full names (first name pattern)"
-          echo "$FIRSTNAME_MATCHES" | head -5
-          VIOLATIONS_FOUND=1
-          STATUS="fail"
-          VIOLATION_TYPES="${VIOLATION_TYPES}fullname_firstname,"
-          
-          # Extract file:line for telemetry
-          while IFS=: read -r file linenum _; do
-            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "fullname"
-          done <<< "$FIRSTNAME_MATCHES"
-        fi
-
-        # Check for capitalized word + surname (potential full names)
-        echo "Checking for surnames..."
-        SURNAME_MATCHES_RAW=$(rg -n --glob '!*.md' --pcre2 "\b($ALL_SURNAMES)\s+($ALL_FIRSTNAMES)\b" . 2>/dev/null | head -50 || true)
-        SURNAME_MATCHES=$(echo "$SURNAME_MATCHES_RAW" | rg --pcre2 -v "($STREET_SUFFIXES)" 2>/dev/null || true)
-        SURNAME_MATCHES=$(echo "$SURNAME_MATCHES" | rg --pcre2 -vi "($INSTITUTION_PATTERN)" | rg -v "post-" | rg --pcre2 -vi "($DOC_METADATA)" 2>/dev/null || true)
-        if [[ -n "$SURNAME_MATCHES" ]]; then
-          echo "::error::Found potential full names (surname pattern)"
-          echo "$SURNAME_MATCHES" | head -5
-          VIOLATIONS_FOUND=1
-          STATUS="fail"
-          VIOLATION_TYPES="${VIOLATION_TYPES}fullname_surname,"
-          
-          # Extract file:line for telemetry
-          while IFS=: read -r file linenum _; do
-            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "fullname"
-          done <<< "$SURNAME_MATCHES"
-        fi
-
-        # Check for addresses (known streets + number)
-        echo "Checking for addresses..."
-        ADDRESS_MATCHES=$(rg -n --glob '!*.md' -i "($ALL_STREETS)[[:space:]]+[0-9]" . 2>/dev/null | head -20 || true)
-        if [[ -n "$ADDRESS_MATCHES" ]]; then
-          echo "::error::Found addresses (known streets)"
-          echo "$ADDRESS_MATCHES" | head -5
-          VIOLATIONS_FOUND=1
-          STATUS="fail"
-          VIOLATION_TYPES="${VIOLATION_TYPES}address_known,"
-          
-          # Extract file:line for telemetry
-          while IFS=: read -r file linenum _; do
-            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "address"
-          done <<< "$ADDRESS_MATCHES"
-        fi
-
-        echo "Checking for email addresses..."
-        IGNORED_LOCAL="example|info|noreply|no-reply|support|contact|admin|webmaster|postmaster|voorbeeld|email"
-        IGNORED_DOMAINS="example\.com|example\.org|example\.net|example\.edu|example\.nl"
-        TLDS="edu|org|gov|com|net|nl|be|de|uk|fr|it|es|ch|se|no|dk|at|au|ca|jp|int|eu|ac"
-        EMAIL_MATCHES=$(rg -n --glob '!*.md' --pcre2 "\b(?!(?:${IGNORED_LOCAL})@)[A-Za-z0-9._%+-]+@(?!(?:${IGNORED_DOMAINS}))[A-Za-z0-9.-]+\.(${TLDS})\b" . 2>/dev/null | head -20 || true)
-        if [[ -n "$EMAIL_MATCHES" ]]; then
-          echo "::error::Found potential email addresses"
-          VIOLATIONS_FOUND=1
-          STATUS="fail"
-          VIOLATION_TYPES="${VIOLATION_TYPES}email_address,"
-          while IFS=: read -r file linenum _; do
-            [[ -n "$file" && -n "$linenum" ]] && add_violation "$file" "$linenum" "email_address"
-          done <<< "$EMAIL_MATCHES"
-        fi
-
-        # Remove trailing comma from violation types
-        VIOLATION_TYPES=$(echo "$VIOLATION_TYPES" | sed 's/,$//')
-
-        # Read and deduplicate violation details, limit to 50 entries
-        VIOLATION_DETAILS=$(jq -c 'unique | .[0:50]' "$DETAILS_FILE")
-        rm -f "$DETAILS_FILE"
-
-        # Set outputs (do NOT exit here - let telemetry run first)
-        echo "status=${STATUS}" >> $GITHUB_OUTPUT
-        echo "violations_found=${VIOLATIONS_FOUND}" >> $GITHUB_OUTPUT
-        echo "violation_types=${VIOLATION_TYPES}" >> $GITHUB_OUTPUT
-        echo "violation_details=${VIOLATION_DETAILS}" >> $GITHUB_OUTPUT
-
-        if [[ $VIOLATIONS_FOUND -eq 1 ]]; then
-          echo ""
-          echo "Personal information detected - will fail after telemetry"
-          echo "Violations: $(echo "$VIOLATION_DETAILS" | jq 'length') locations"
-        else
-          echo ""
-          echo "No personal information detected"
-        fi
-
+      shell: bash
+      # This action runs from a full checkout of org-security-workflows
+      # at its own ref (github.action_path points inside it), so the
+      # shared matching logic (personal_info.py) and the reference
+      # lists (personal-info-lists/) are already on disk here. No
+      # separate fetch, no ripgrep/jq install, and no bash
+      # reimplementation of the matching logic.
+      run: python3 "${{ github.action_path }}/personal-info-check.py"
 
     - name: Send telemetry via repository dispatch
       if: ${{ inputs.telemetry-pat != '' && steps.scan.outputs.status == 'fail' }}
@@ -270,7 +83,7 @@ runs:
         echo "Violation types: ${{ steps.scan.outputs.violation_types }}"
         echo ""
         echo "Personal information was detected in repository files."
-        echo "This may include patient names, addresses, or email addresses."
+        echo "This may include names, addresses, or email addresses."
         echo ""
         echo "These must be removed before the code can be pushed."
         echo "See: https://github.com/AmsterdamUMC/org-security-workflows#remediation"
