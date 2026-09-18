@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from filetypes import (
-    load_forbidden_patterns, find_blocked_files, report_blocked_files,
+    extract_forbidden_block, find_blocked_files, report_blocked_files,
     report_corrupted_rules_file, MIN_EXPECTED_PATTERNS,
 )
 if sys.platform == "win32":
@@ -78,17 +78,17 @@ def main() -> int:
         print(f"[ERROR] central-gitignore.txt not found at: {rules_file}")
         return 1
 
-    blocked_patterns, exception_patterns, found_begin, found_end = load_forbidden_patterns(rules_file)
+    forbidden_block, found_begin, found_end, pattern_count = extract_forbidden_block(rules_file)
 
-    if not found_begin or not found_end or len(blocked_patterns) < MIN_EXPECTED_PATTERNS:
-        report_corrupted_rules_file(rules_file, found_begin, found_end, len(blocked_patterns))
+    if not found_begin or not found_end or pattern_count < MIN_EXPECTED_PATTERNS:
+        report_corrupted_rules_file(rules_file, found_begin, found_end, pattern_count)
         return 1
-    
+
     files = get_files_to_check()
     if not files:
         return 0
 
-    blocked_files = find_blocked_files(files, blocked_patterns, exception_patterns)
+    blocked_files = find_blocked_files(files, forbidden_block)
 
     if blocked_files:
         report_blocked_files(blocked_files, "git push --no-verify")

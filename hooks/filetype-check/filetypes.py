@@ -2,67 +2,102 @@
 Shared forbidden-filetype detection logic for the pre-commit and
 pre-push hooks. Both hooks import from here so the pattern-matching
 logic only needs to be changed in one place.
+
+Matching is delegated to `git check-ignore`, Git's own .gitignore
+engine, rather than a hand-rolled reimplementation, so full
+.gitignore syntax (including ** and negation) works correctly.
+
+All files are checked in a single `git check-ignore --stdin` call,
+not one process per file, so this stays fast even on a full-tree
+check (pre-push on a new branch, or the org-wide scanner).
+
+--no-index is required: without it, git check-ignore silently skips
+paths that are already tracked/staged, which is exactly the case a
+pre-commit hook needs to check.
 """
 
-import fnmatch
+import subprocess
+import tempfile
 from pathlib import Path
 
 MIN_EXPECTED_PATTERNS = 20
 
-def load_forbidden_patterns(rules_file: Path) -> tuple[list[str], list[str], bool, bool]:
+
+def extract_forbidden_block(rules_file: Path) -> tuple[str, bool, bool, int]:
     """
-    Extract FORBIDDEN patterns from central-gitignore.txt.
-    Returns (blocked_patterns, exception_patterns).
+    Extract the lines between # BEGIN FORBIDDEN and # END FORBIDDEN
+    from central-gitignore.txt, verbatim and in order (order matters
+    for gitignore negation semantics).
+
+    Returns (block_text, found_begin, found_end, pattern_count), where
+    pattern_count is the number of non-comment, non-blank lines found
+    (blocked and exception patterns together), used to detect a
+    corrupted or truncated rules file.
     """
-    blocked_patterns = []
-    exception_patterns = []
-    in_forbidden = False
+    lines = []
     found_begin = False
     found_end = False
+    in_forbidden = False
 
     with open(rules_file, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
+        for raw_line in f:
+            stripped = raw_line.strip()
 
-            if line == "# BEGIN FORBIDDEN":
+            if stripped == "# BEGIN FORBIDDEN":
                 found_begin = True
                 in_forbidden = True
                 continue
-            elif line == "# END FORBIDDEN":
+            elif stripped == "# END FORBIDDEN":
                 found_end = True
                 in_forbidden = False
                 continue
 
             if not in_forbidden:
                 continue
-            if not line or line.startswith("#"):
-                continue
 
-            if line.startswith("!"):
-                exception_patterns.append(line[1:])
-            else:
-                blocked_patterns.append(line)
+            lines.append(raw_line.rstrip("\n"))
 
-    return blocked_patterns, exception_patterns, found_begin, found_end
+    pattern_count = sum(
+        1 for line in lines if line.strip() and not line.strip().startswith("#")
+    )
 
-def matches_pattern(filepath: str, pattern: str) -> bool:
-    """Check if a filename matches a glob pattern."""
-    basename = Path(filepath).name
-    return fnmatch.fnmatch(basename, pattern)
+    return "\n".join(lines), found_begin, found_end, pattern_count
 
 
-def find_blocked_files(files: list[str], blocked_patterns: list[str], exception_patterns: list[str]) -> list[str]:
-    """Return the subset of files that match a blocked pattern and no exception pattern."""
-    blocked_files = []
+def find_blocked_files(files: list[str], forbidden_block: str) -> list[str]:
+    """
+    Return the subset of `files` that match the FORBIDDEN block,
+    checked in a single git check-ignore call.
+    """
+    if not files or not forbidden_block.strip():
+        return []
 
-    for filepath in files:
-        is_blocked = any(matches_pattern(filepath, p) for p in blocked_patterns)
-        is_exception = is_blocked and any(matches_pattern(filepath, p) for p in exception_patterns)
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".gitignore", delete=False, encoding="utf-8"
+    ) as tmp:
+        tmp.write(forbidden_block + "\n")
+        tmp_path = tmp.name
 
-        if is_blocked and not is_exception:
-            blocked_files.append(filepath)
-
-    return blocked_files
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-c", f"core.excludesfile={tmp_path}",
+                "check-ignore",
+                "--stdin",
+                "--no-index",
+            ],
+            input="\n".join(files),
+            capture_output=True,
+            text=True,
+        )
+        # check-ignore exits 1 when nothing matched; that is not an
+        # error for us, only an unexpected exit code is.
+        if result.returncode not in (0, 1):
+            raise RuntimeError(f"git check-ignore failed: {result.stderr.strip()}")
+        return [line for line in result.stdout.splitlines() if line]
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
 
 
 def report_blocked_files(blocked_files: list[str], bypass_command: str) -> None:
@@ -82,7 +117,7 @@ def report_blocked_files(blocked_files: list[str], bypass_command: str) -> None:
     print("If this is a false positive, contact your data steward.")
     print(f"To bypass (NOT recommended): {bypass_command}")
     print()
-    
+
 
 def report_corrupted_rules_file(rules_file, found_begin, found_end, pattern_count):
     print()

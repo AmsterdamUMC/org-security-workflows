@@ -15,11 +15,12 @@ if [[ ! -f "$RULES_FILE" ]]; then
   exit 1
 fi
 
-ft_load_patterns "$RULES_FILE"
+ft_extract_forbidden_block "$RULES_FILE"
+trap 'rm -f "$FORBIDDEN_TMPFILE"' EXIT
 
-if [[ ${#BLOCKED_PATTERNS[@]} -eq 0 ]]; then
-  echo "[WARNING] No FORBIDDEN patterns found in central-gitignore.txt"
-  exit 0
+if [[ "$FOUND_BEGIN" == false || "$FOUND_END" == false || "$PATTERN_COUNT" -lt "$MIN_EXPECTED_PATTERNS" ]]; then
+  ft_report_corrupted_rules_file "$RULES_FILE"
+  exit 1
 fi
 
 if [[ -n "${PRE_COMMIT_FROM_REF:-}" && -n "${PRE_COMMIT_TO_REF:-}" ]]; then

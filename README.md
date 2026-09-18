@@ -427,7 +427,7 @@ Edit `central-gitignore.txt` and commit. Changes take effect:
 
 ### PII Detection
 
-Update files in `personal-info-lists/` to add or remove name patterns.
+Update files in `personal-info-lists/` to add or remove name patterns. See [`personal-info-lists/README.md`](personal-info-lists/README.md) for what these lists contain and how to regenerate them.
 
 ### Secrets Detection
 

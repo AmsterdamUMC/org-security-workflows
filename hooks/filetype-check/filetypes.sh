@@ -1,78 +1,80 @@
 #!/usr/bin/env bash
 # Shared forbidden-filetype detection logic for the pre-commit and
 # pre-push bash hooks. Sourced, not executed directly.
+#
+# Delegates matching to `git check-ignore` (Git's own .gitignore
+# engine) rather than hand-rolled glob matching, so full .gitignore
+# syntax (including ** and negation) works correctly.
+#
+# All files are checked in a single call via --stdin, not one process
+# per file, to stay fast on a full-tree check.
+#
+# --no-index is required: without it, git check-ignore silently skips
+# paths that are already tracked/staged, which is exactly the case a
+# pre-commit hook needs to check.
 
-# Loads central-gitignore.txt into globals BLOCKED_PATTERNS / EXCEPTION_PATTERNS
-ft_load_patterns() {
+MIN_EXPECTED_PATTERNS=20
+
+# Extracts the FORBIDDEN block from $1 (central-gitignore.txt) into a
+# temp file (sets FORBIDDEN_TMPFILE), and sets FOUND_BEGIN, FOUND_END,
+# and PATTERN_COUNT for corruption detection. Caller is responsible
+# for cleaning up the temp file (trap 'rm -f "$FORBIDDEN_TMPFILE"' EXIT).
+ft_extract_forbidden_block() {
     local rules_file="$1"
-    BLOCKED_PATTERNS=()
-    EXCEPTION_PATTERNS=()
+    FORBIDDEN_TMPFILE="$(mktemp)"
+    FOUND_BEGIN=false
+    FOUND_END=false
+    PATTERN_COUNT=0
 
     local in_forbidden=false
     while IFS= read -r line; do
-        # Strip Windows carriage return (CRLF -> LF)
         line="${line%$'\r'}"
 
         if [[ "$line" == "# BEGIN FORBIDDEN" ]]; then
+            FOUND_BEGIN=true
             in_forbidden=true
             continue
         elif [[ "$line" == "# END FORBIDDEN" ]]; then
+            FOUND_END=true
             in_forbidden=false
             continue
         fi
 
         [[ "$in_forbidden" == false ]] && continue
-        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
 
-        # Trim whitespace
-        line="${line#"${line%%[![:space:]]*}"}"
-        line="${line%"${line##*[![:space:]]}"}"
+        echo "$line" >> "$FORBIDDEN_TMPFILE"
 
-        if [[ "$line" == !* ]]; then
-            EXCEPTION_PATTERNS+=("${line#!}")
-        else
-            BLOCKED_PATTERNS+=("${line}")
+        local trimmed="${line#"${line%%[![:space:]]*}"}"
+        trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+        if [[ -n "$trimmed" && "$trimmed" != \#* ]]; then
+            PATTERN_COUNT=$((PATTERN_COUNT + 1))
         fi
     done < "$rules_file"
 }
 
-ft_matches_pattern() {
-    local file="$1"
-    local pattern="$2"
-    local basename="${file##*/}"
-    [[ "$basename" == $pattern ]]
-}
-
-# Populates global BLOCKED_FILES from the FILES array against
-# BLOCKED_PATTERNS / EXCEPTION_PATTERNS.
+# Populates global BLOCKED_FILES from the given files, checked in one
+# batched git check-ignore call against $FORBIDDEN_TMPFILE.
 ft_find_blocked_files() {
     BLOCKED_FILES=()
-    local file pattern is_blocked is_exception
+    local files=("$@")
+    [[ ${#files[@]} -eq 0 ]] && return 0
 
-    for file in "$@"; do
-        is_blocked=false
-        is_exception=false
+    local output
+    output=$(printf '%s\n' "${files[@]}" \
+        | git -c core.excludesfile="$FORBIDDEN_TMPFILE" check-ignore --stdin --no-index)
+    local status=$?
 
-        for pattern in "${BLOCKED_PATTERNS[@]}"; do
-            if ft_matches_pattern "$file" "$pattern"; then
-                is_blocked=true
-                break
-            fi
-        done
+    # exit 1 = nothing matched, not an error for us
+    if [[ $status -gt 1 ]]; then
+        echo "[ERROR] git check-ignore failed" >&2
+        return 1
+    fi
 
-        if [[ "$is_blocked" == true ]]; then
-            for pattern in "${EXCEPTION_PATTERNS[@]}"; do
-                if ft_matches_pattern "$file" "$pattern"; then
-                    is_exception=true
-                    break
-                fi
-            done
-        fi
-
-        if [[ "$is_blocked" == true && "$is_exception" == false ]]; then
-            BLOCKED_FILES+=("$file")
-        fi
-    done
+    if [[ -n "$output" ]]; then
+        while IFS= read -r f; do
+            BLOCKED_FILES+=("$f")
+        done <<< "$output"
+    fi
 }
 
 ft_report_blocked_files() {
@@ -92,5 +94,21 @@ ft_report_blocked_files() {
     echo ""
     echo "If this is a false positive, contact your data steward."
     echo "To bypass (NOT recommended): $bypass_command"
+    echo ""
+}
+
+ft_report_corrupted_rules_file() {
+    local rules_file="$1"
+    echo ""
+    echo "==============================================================="
+    echo "  ERROR: central-gitignore.txt appears to be corrupted"
+    echo "==============================================================="
+    [[ "$FOUND_BEGIN" == false ]] && echo "  - Missing '# BEGIN FORBIDDEN' marker"
+    [[ "$FOUND_END" == false ]] && echo "  - Missing '# END FORBIDDEN' marker"
+    if [[ "$FOUND_BEGIN" == true && "$FOUND_END" == true && "$PATTERN_COUNT" -lt "$MIN_EXPECTED_PATTERNS" ]]; then
+        echo "  - Only $PATTERN_COUNT pattern(s) found, expected at least $MIN_EXPECTED_PATTERNS"
+    fi
+    echo ""
+    echo "Blocking commit/push as a precaution. Contact the security team."
     echo ""
 }
