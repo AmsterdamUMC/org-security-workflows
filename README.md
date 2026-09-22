@@ -12,31 +12,43 @@ org-security-workflows/
 │   └── workflows/
 │       ├── check-forbidden-filetypes.yml    # Reusable workflow for filetype scanning
 │       ├── check-gitleaks.yml               # Reusable workflow for secrets detection
-│       └── check-personal-info.yml          # Reusable workflow for PII scanning
+│       ├── check-personal-info.yml          # Reusable workflow for PII scanning
+│       └── tests.yml                        # Runs the pytest suite below on push/PR
 ├── actions/
 │   ├── filetype-check/
-│   │   └── action.yml                       # Composite action for filetype detection
+│   │   ├── action.yml                       # Composite action for filetype detection
+│   │   ├── filetype-check.py                # Action entry point (uses hooks/filetype-check/filetypes.py)
+│   │   └── DESIGN.md                        # Design rationale for this action
 │   ├── gitleaks-check/
 │   │   └── action.yml                       # Composite action for secrets detection
 │   └── personal-info-check/
-│       └── action.yml                       # Composite action for PII detection
-├── pre-commit-check/
-│   ├── check-filetypes.py                   # Pre-commit hook for filetypes
-│   ├── check-filetypes.sh                   # Legacy bash version
-│   ├── check-personal-info.py               # Pre-commit hook for PII
-│   └── check-personal-info.sh               # Legacy bash version
-├── pre-push-check/
-│   ├── check-filetypes-prepush.py           # Pre-push hook for filetypes
-│   ├── check-filetypes-prepush.sh           # Legacy bash version
-│   ├── check-personal-info-prepush.py       # Pre-push hook for PII
-│   └── check-personal-info-prepush.sh       # Legacy bash version
+│       ├── action.yml                       # Composite action for PII detection
+│       ├── personal-info-check.py           # Action entry point (uses hooks/personal-info-check/personal_info.py)
+│       └── DESIGN.md                        # Design rationale for this action
+├── hooks/
+│   ├── filetype-check/
+│   │   ├── filetypes.py                     # Shared filetype-matching logic (Python)
+│   │   ├── filetypes.sh                     # Shared filetype-matching logic (bash, legacy)
+│   │   ├── check-filetypes-precommit.py/.sh # Pre-commit hook
+│   │   ├── check-filetypes-prepush.py/.sh   # Pre-push hook
+│   │   └── DESIGN.md                        # Design rationale (matching approach, history)
+│   └── personal-info-check/
+│       ├── personal_info.py                 # Shared PII-matching logic (Python)
+│       ├── personal-info.sh                 # Shared PII-matching logic (bash, legacy)
+│       ├── check-personal-info-precommit.py/.sh # Pre-commit hook
+│       ├── check-personal-info-prepush.py/.sh   # Pre-push hook
+│       └── DESIGN.md                        # Design rationale (matching approach, history)
 ├── personal-info-lists/
 │   ├── common-dutch-firstnames.txt          # Dutch first name database
 │   ├── common-dutch-surnames.txt            # Dutch surname database
 │   └── common-dutch-streetnames.txt         # Dutch street name database
+├── tests/                                   # pytest suite for hooks/ and actions/*.py (see Development)
+│   └── fixtures/                            # Golden input/expected-output files used by the suite
 ├── central-gitignore.txt                    # Forbidden file patterns
 ├── gitleaks.toml                            # Secrets detection rules
 ├── .pre-commit-hooks.yaml                   # Hook definitions for pre-commit framework
+├── pyproject.toml                           # pytest configuration
+├── requirements-dev.txt                     # Test dependencies
 ├── LICENSE
 └── README.md
 ```
@@ -443,6 +455,30 @@ When making changes:
 
 Repositories using `@main` receive changes immediately. Repositories pinned to a version tag must update their `.pre-commit-config.yaml` to receive changes.
 
+## Development
+
+### Running the Test Suite
+
+The shared detection logic (`hooks/*/filetypes.py`, `hooks/*/personal_info.py`), the hook entry-point scripts, and the GitHub Action entry-point scripts all have a pytest suite under `tests/`. It runs automatically on every push/PR via `.github/workflows/tests.yml`.
+
+To run it locally:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest -v
+```
+
+What's covered, and how:
+
+- **Detection logic** (`test_filetypes_fixtures.py`, `test_personal_info_fixtures.py`): golden-fixture tests under `tests/fixtures/`, each a real input file plus an `expected.json` of what should (or shouldn't) be flagged. Add a fixture directory to add a case, no test code changes needed. The personal-info fixtures run against the real `personal-info-lists/` reference data, not a synthetic lexicon.
+- **Pure helper functions** (`test_filetypes.py`, `test_personal_info.py`): small inline unit tests for logic that isn't naturally file-shaped (parsing, false-positive filters).
+- **Hook entry points** (`test_filetypes_hooks.py`, `test_personal_info_hooks.py`): run the real hook scripts as subprocesses against real throwaway git repos, covering both pre-commit (staged files) and pre-push (both its `PRE_COMMIT_FROM_REF`/`TO_REF` and standalone-stdin invocation modes).
+- **GitHub Action entry points** (`test_filetype_check_action.py`, `test_personal_info_check_action.py`): same subprocess approach, scoped to `git ls-files` and asserting on `$GITHUB_OUTPUT` content, since these scripts always exit 0 and signal pass/fail through their output instead.
+- **Bash implementations** (`test_sh_smoke.py`): smoke-tested only (source + run without crashing), not asserted for behavioral parity with the Python versions. They're treated as legacy, a structurally different reimplementation (regex-over-raw-text vs. Python's tokenized n-gram matching), not a like-for-like port, so example-based parity tests could only prove agreement on the sampled cases while immediately hard-coding around known divergences.
+
+Not covered: `actions/gitleaks-check/` has no custom logic (inline bash around a third-party binary), and no test exercises `action.yml` itself, a wiring mistake there (wrong step ID, wrong output key) would only surface in an actual GitHub Actions run.
+
 ## Related Repositories
 
 | Repository | Purpose |
@@ -454,7 +490,7 @@ Repositories using `@main` receive changes immediately. Repositories pinned to a
 
 ## License
 
-MIT License - See [LICENSE](LICENSE)
+Apache License 2.0 - See [LICENSE](LICENSE)
 
 ## Support
 
