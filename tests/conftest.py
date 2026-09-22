@@ -83,6 +83,39 @@ def run_hook(script: Path, args=None, cwd=None, env=None, stdin_text=None) -> su
     )
 
 
+def run_action(script: Path, cwd: Path) -> tuple[subprocess.CompletedProcess, dict]:
+    """
+    Run a GitHub Actions entry-point script (actions/*/*.py) as a real
+    subprocess against cwd (a real git repo with tracked files),
+    providing a GITHUB_OUTPUT file the same way the Actions runner
+    does. Returns (process, parsed GITHUB_OUTPUT key/value pairs):
+    these scripts always exit 0 and signal pass/fail through
+    GITHUB_OUTPUT's `status` field instead of the process exit code,
+    so the exit code alone isn't enough to assert against.
+    """
+    import os
+
+    output_file = cwd / "github_output.txt"
+    output_file.write_text("")
+    full_env = dict(os.environ)
+    full_env["GITHUB_OUTPUT"] = str(output_file)
+
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=cwd,
+        env=full_env,
+        capture_output=True,
+        text=True,
+    )
+
+    output = {}
+    for line in output_file.read_text().splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            output[key] = value
+    return result, output
+
+
 @pytest.fixture(scope="session")
 def real_patterns():
     """
