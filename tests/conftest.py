@@ -34,8 +34,53 @@ def git_repo(tmp_path, monkeypatch):
     results, so tests get an isolated throwaway repo instead.
     """
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    # Local (not global) config, so committing works the same in CI
+    # as on a dev machine with no git identity configured yet.
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
     monkeypatch.chdir(tmp_path)
     return tmp_path
+
+
+def commit_file(repo: Path, filename: str, content: str) -> str:
+    """
+    Write filename with content, `git add` + `git commit` it in repo,
+    and return the resulting commit SHA. Used to build up commit
+    history with known SHAs for the pre-push hook tests, which take
+    a from/to ref pair (env vars or stdin) rather than a working-tree
+    diff.
+    """
+    (repo / filename).write_text(content)
+    subprocess.run(["git", "add", filename], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", f"add {filename}"], cwd=repo, check=True)
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def run_hook(script: Path, args=None, cwd=None, env=None, stdin_text=None) -> subprocess.CompletedProcess:
+    """
+    Run a hook entry-point script as a real subprocess, the same way
+    git/pre-commit invoke it. Hook filenames contain hyphens
+    (check-personal-info-precommit.py), so they can't be `import`ed
+    as ordinary modules; importlib-based loading would also dodge
+    the exact failure mode ("hyphenated module import breakage")
+    these scripts have broken on before, so subprocess is used
+    instead of working around that.
+    """
+    import os
+
+    full_env = dict(os.environ)
+    if env:
+        full_env.update(env)
+    return subprocess.run(
+        [sys.executable, str(script)] + (args or []),
+        cwd=cwd,
+        env=full_env,
+        input=stdin_text,
+        capture_output=True,
+        text=True,
+    )
 
 
 @pytest.fixture(scope="session")
