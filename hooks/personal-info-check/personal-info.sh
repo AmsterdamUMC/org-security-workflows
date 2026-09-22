@@ -29,7 +29,7 @@ pi_load_patterns() {
 # names, institution names, "post-" prefixed words, and doc/metadata
 # lines (author, copyright, etc.), since Dutch surnames overlap with
 # these enough to otherwise flood results with noise.
-# Mirrors is_name_false_positive() in personal_info.py — keep both in
+# Mirrors is_name_false_positive() in personal_info.py. Keep both in
 # sync when changing either.
 pi_filter_name_matches() {
     grep -ivE "($STREET_SUFFIXES)" \

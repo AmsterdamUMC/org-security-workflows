@@ -49,7 +49,7 @@ signal that produced many more false positives.
 A candidate match is discarded (not a violation) if the line also
 contains any of:
 
-- a Dutch street suffix (straat, laan, weg, etc.) — avoids flagging
+- a Dutch street suffix (straat, laan, weg, etc.): avoids flagging
   street names like "Jan van Galenstraat" as a person's name
 - an institution name (ziekenhuis, kliniek, hospital, clinic)
 - a "post-" prefix

@@ -70,7 +70,7 @@ def build_patterns(firstnames, surnames, streetnames) -> dict:
 
     Surnames are grouped by word count into `surname_ngrams` (a dict
     keyed by n) because multi-word surnames must be matched as a
-    fixed-length phrase, not token-by-token — checking every n-gram
+    fixed-length phrase, not token-by-token, checking every n-gram
     length surnames actually appear in average avoids both missing
     multi-word names and matching partial fragments of them.
 
@@ -132,7 +132,7 @@ def is_name_false_positive(line_stripped: str, patterns: dict) -> bool:
     A line is treated as a false positive if it also looks like a
     street name (suffix match), an institution name, a "post-"
     prefixed word, or a documentation/metadata line (author,
-    copyright, maintainer, etc.) — those contexts are expected to
+    copyright, maintainer, etc.). Those contexts are expected to
     contain real names legitimately.
     """
     if patterns["street_suffix_filter"].search(line_stripped):
