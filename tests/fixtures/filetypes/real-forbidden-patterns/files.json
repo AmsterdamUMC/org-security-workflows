@@ -1,0 +1,9 @@
+[
+  "data/participants.csv",
+  "results/model.pkl",
+  "secrets/.env",
+  "secrets/service.key",
+  "src/analysis.py",
+  "README.md",
+  "docs/notes.txt"
+]

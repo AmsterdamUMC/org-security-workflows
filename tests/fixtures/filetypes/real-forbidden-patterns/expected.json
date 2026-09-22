@@ -1,0 +1,6 @@
+[
+  "data/participants.csv",
+  "results/model.pkl",
+  "secrets/.env",
+  "secrets/service.key"
+]
