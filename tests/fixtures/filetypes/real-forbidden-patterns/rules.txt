@@ -1,0 +1,72 @@
+
+# --- Tabular data ---
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.sav
+*.dta
+*.feather
+*.parquet
+
+# --- Statistical/scientific data formats ---
+*.RData
+*.rds
+*.mat
+*.pkl
+*.npz
+*.npy
+*.fig
+
+# --- Databases ---
+*.sqlite
+*.db
+
+# --- Imaging & biosignals ---
+*.nii
+*.nii.gz
+*.dcm
+*.edf
+*.bdf
+*.eeg
+*.vhdr
+*.vmrk
+
+# --- Genomics & bioinformatics ---
+*.fastq
+*.fastq.gz
+*.fasta
+*.fasta.gz
+*.fna
+*.bam
+*.sam
+*.vcf
+*.gtf
+*.gff
+*.bed
+*.wig
+*.bigWig
+
+# --- Audio/video data ---
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.wav
+*.flac
+
+# --- Archives (may contain data) ---
+*.zip
+*.tar.gz
+*.7z
+*.rar
+
+# --- Credentials & secrets ---
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+*.crt
+

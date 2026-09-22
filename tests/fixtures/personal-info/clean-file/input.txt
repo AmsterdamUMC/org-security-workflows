@@ -1,0 +1,2 @@
+This file has nothing sensitive in it.
+Just some ordinary project notes.
