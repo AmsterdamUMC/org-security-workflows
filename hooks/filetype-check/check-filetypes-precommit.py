@@ -9,6 +9,7 @@ messages. The actual matching logic lives in filetypes.py.
 """
 
 import io
+import subprocess
 import sys
 from pathlib import Path
 
@@ -22,6 +23,16 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 if sys.version_info[0] < 3:
     sys.exit("This script requires Python 3")
+
+
+def get_staged_files() -> list[str]:
+    """Get list of staged files."""
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+        capture_output=True,
+        text=True,
+    )
+    return [f for f in result.stdout.strip().split("\n") if f]
 
 
 def main() -> int:
@@ -39,7 +50,7 @@ def main() -> int:
         report_corrupted_rules_file(rules_file, found_begin, found_end, pattern_count)
         return 1
 
-    files = sys.argv[1:]
+    files = sys.argv[1:] if len(sys.argv) > 1 else get_staged_files()
     if not files:
         return 0
 
