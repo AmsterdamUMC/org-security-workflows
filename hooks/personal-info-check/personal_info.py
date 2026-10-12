@@ -93,7 +93,7 @@ def build_patterns(firstnames, surnames, streetnames) -> dict:
         "surname_ngrams": surname_ngrams,
         "street_ngrams": street_ngrams,
         "street_suffix_filter": re.compile(STREET_SUFFIXES, re.IGNORECASE),
-        "word_token": re.compile(r"[A-Za-z][a-zA-Z'-]*"),
+        "word_token": re.compile(r"[^\W\d_]+(?:[-'][^\W\d_]+)*", re.UNICODE),
         "email": EMAIL_PATTERN,
         "institution_filter": re.compile(INSTITUTION_PATTERN, re.IGNORECASE),
     }
