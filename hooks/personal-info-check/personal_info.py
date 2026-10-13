@@ -6,9 +6,9 @@ need to be changed in one place.
 Unlike filetype-check, there is no single shared engine underneath
 (no git check-ignore equivalent): this Python module and
 personal-info.sh are two independent reimplementations of the same
-rules, one per language. If you add/change a pattern or false-positive
-rule here, mirror the change in personal-info.sh too, or the two
-hooks will silently disagree.
+rules, one per language. The bash version is legacy and is not kept at
+feature parity (see .pre-commit-hooks.yaml), so changes made here do
+not have to be mirrored in personal-info.sh, but the two may disagree.
 
 Detection works on a per-line basis: build_patterns() compiles the
 name/street/email regexes once from the reference lists, and

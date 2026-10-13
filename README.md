@@ -103,12 +103,12 @@ Secrets detection runs only as a GitHub Action (not in local hooks) because gitl
 
 The `central-gitignore.txt` file defines which file types are blocked:
 
+Simplified excerpt (the real file lists many more patterns):
+
 ```gitignore
 # BEGIN FORBIDDEN
 *.csv
 *.xlsx
-!package.json         # Exception: allowed
-!package-lock.json    # Exception: allowed
 # END FORBIDDEN
 
 # Everything below is convenience-only (not enforced)
@@ -124,7 +124,7 @@ __pycache__/
 `.csv`, `.tsv`, `.xlsx`, `.xls`, `.sav`, `.dta`, `.feather`, `.parquet`
 
 **Statistical/scientific data formats**
-`.RData`, `.rds`, `.mat`, `.pk1`, `.npz`, `.npy`, `.fig`
+`.RData`, `.rds`, `.mat`, `.pkl`, `.npz`, `.npy`, `.fig`
 
 **Databases**
 `.sqlite`, `.db`
@@ -148,30 +148,29 @@ See `central-gitignore.txt` for the complete and current list.
 
 ## Personal Information Detection
 
-The PII scanner detects patterns common in Dutch healthcare research.
+The PII scanner detects patterns common in Dutch healthcare research. At most one violation is reported per line.
 
 ### What Gets Detected
 
-**Dutch names**
-- First names from `personal-info-lists/common-dutch-firstnames.txt`
-- Surnames from `personal-info-lists/common-dutch-surnames.txt`
-- Combinations suggesting full names (e.g., first name followed by capitalized word)
+**Full names**
+- A known first name (`personal-info-lists/common-dutch-firstnames.txt`) directly next to a known surname (`personal-info-lists/common-dutch-surnames.txt`), in either order (e.g. "Jan Smit" or "Smit Jan"). Surnames can be multi-word ("van der Berg").
+- Matching is case-sensitive, so a lowercase variable like `max` does not match the first name "Max".
 
 **Dutch addresses**
-- Street names from `personal-info-lists/common-dutch-streetnames.txt`
-- Any word with Dutch street suffixes (straat, laan, weg, plein, gracht, etc.) followed by a house number
-- Postal code patterns
+- Known street names from `personal-info-lists/common-dutch-streetnames.txt`, flagged as `Address` when followed by a house number and as `Address (no number)` (lower confidence) when not.
+- Only streets in the list are matched. There is no generic "word ending in -straat followed by a number" fallback.
 
-**Identifiers**
-- Patient IDs (7-digit patterns)
-- BSN (Burgerservicenummer) - validated using the 11-proof (elfproef) checksum to reduce false positives
+**Email addresses**
+- Standard email patterns, excluding placeholder local parts (`info@`, `noreply@`, `admin@`, ...) and placeholder domains (`example.com`, `example.nl`, ...).
+
+Patient ID and BSN detection were removed because of their false-positive rate. See [`hooks/personal-info-check/DESIGN.md`](hooks/personal-info-check/DESIGN.md).
 
 ### Reducing False Positives
 
 The PII detection is tuned for medical research contexts:
-- Markdown files (`.md`) are excluded to allow documentation with example names
-- Street suffix patterns filter out false positive name matches
-- BSN detection uses checksum validation (only ~1 in 11 random 9-digit numbers pass)
+
+- Markdown files (`.md`) and binary files are skipped, so documentation can contain example names
+- A name match is discarded if the line also contains a street suffix (straat, laan, weg, ...), an institution name (ziekenhuis, kliniek, ...), a `post-` prefix, or a metadata keyword (author, copyright, maintainer, ...)
 
 If you encounter false positives, please report them so we can refine the detection rules.
 
@@ -227,7 +226,7 @@ jobs:
     uses: AmsterdamUMC/org-security-workflows/.github/workflows/check-gitleaks.yml@main
 ```
 
-For stability, replace `@main` with a specific version tag (e.g., `@v0.2.21`).
+For stability, replace `@main` with a specific version tag (e.g., `@v0.6.0`).
 
 ### Using the Pre-Commit Hooks
 
@@ -236,7 +235,7 @@ Add to your repository's `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/AmsterdamUMC/org-security-workflows
-    rev: v0.2.21
+    rev: v0.6.0
     hooks:
       # Python versions (recommended)
       - id: check-forbidden-filetypes
@@ -270,7 +269,7 @@ pre-commit install --hook-type pre-push
 
 ### Pre-commit Hook
 
-```
+```bash
 ===============================================================
   ERROR: Forbidden file types detected!
 ===============================================================
@@ -290,6 +289,7 @@ To bypass (NOT recommended): git commit --no-verify
 The workflow fails with a red X and annotates the problematic files. Pull requests cannot be merged until the violation is resolved.
 
 When a violation is detected:
+
 1. The workflow fails
 2. A security alert is sent to the `security-telemetry` repository
 3. The security team is notified
@@ -305,7 +305,7 @@ When GitHub Actions detect violations, they send telemetry to the `security-tele
 | Check | What's Sent | What's NOT Sent |
 |-------|-------------|-----------------|
 | Filetypes | Filenames that were blocked | File contents |
-| Personal info | Violation types (e.g., "bsn", "fullname") | Actual names, BSN numbers, addresses |
+| Personal info | Violation types, file path and line number (max. 50 locations) | The matched names, addresses or email addresses |
 | Secrets | File locations and rule IDs | Actual secret values |
 
 Example telemetry payload:
@@ -321,7 +321,11 @@ Example telemetry payload:
     "ref": "refs/heads/main",
     "timestamp": "2024-01-15T10:30:00Z",
     "run_id": "12345678",
-    "violation_types": ["bsn", "fullname_firstname", "address_known"]
+    "violations_found": 1,
+    "violation_types": ["Address", "Full Name"],
+    "violation_details": [
+      {"file": "src/analysis.py", "line": 42, "category": "Full Name"}
+    ]
   }
 }
 ```
@@ -450,7 +454,7 @@ Edit `gitleaks.toml` to modify detection rules or allowlists.
 When making changes:
 1. Update the relevant configuration files
 2. Test thoroughly in a non-production repository
-3. Create a new version tag (e.g., `v0.2.22`)
+3. Create a new version tag (e.g., `v0.6.1`)
 4. Update documentation to reference the new version
 
 Repositories using `@main` receive changes immediately. Repositories pinned to a version tag must update their `.pre-commit-config.yaml` to receive changes.
@@ -482,7 +486,7 @@ Not covered: `actions/gitleaks-check/` has no custom logic (inline bash around a
 ## Related Repositories
 
 | Repository | Purpose |
-|------------|---------|
+| ------------ | --------- |
 | `org-security-workflows` | Security rules and hooks (this repo) |
 | `org-security-scanner` | Organization-wide scanning for violations |
 | `security-telemetry` | Central alerting and logging |
