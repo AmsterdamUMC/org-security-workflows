@@ -11,7 +11,7 @@ jobs:
         steps:
             - uses: actions/checkout@v4
             - name: Central personal info check with telemetry
-              uses: AmsterdamUMC/org-security-workflows/actions/personal-info-check@dev
+              uses: AmsterdamUMC/org-security-workflows/actions/personal-info-check@main
               with:
                   telemetry-pat: ${{ secrets.TELEMETRY_PAT }}
                   telemetry-repo: AmsterdamUMC/security-telemetry
