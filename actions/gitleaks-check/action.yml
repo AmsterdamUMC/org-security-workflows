@@ -146,7 +146,7 @@ runs:
               actor: process.env.GITHUB_ACTOR,
               secrets_count: parseInt(process.env.SECRETS_COUNT),
               // Only file locations and rule types - no secret values
-              findings: secretsList,
+              secrets_list: secretsList,
               timestamp: new Date().toISOString()
             }
           });
