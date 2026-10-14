@@ -5,7 +5,7 @@
 Scans files for content that looks like Dutch personal information:
 full names, addresses, and email addresses. Used by the pre-commit
 hook, pre-push hook, and the GitHub Action, all via the same shared
-module (personal_info.py / personal_info.sh).
+module (personal_info.py).
 
 ## Files skipped before scanning
 
@@ -111,8 +111,8 @@ reported per line.
 
 ## Shared module, not duplicated per entry point
 
-personal_info.py / personal_info.sh contain all of the above. The
-precommit and prepush entry scripts (in both languages), and the
+personal_info.py contains all of the above. The precommit and
+prepush entry scripts, and the
 GitHub Action's personal-info-check.py, only differ in how they
 select which files to check and in their user-facing messages. This
 is intentional: detection behaviour cannot drift between them because

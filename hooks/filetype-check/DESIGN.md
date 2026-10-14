@@ -6,7 +6,7 @@ Blocks committing/pushing files whose name matches a forbidden
 pattern (data files, medical imaging formats, credentials, etc.),
 defined once in central-gitignore.txt's FORBIDDEN block. Used by the
 pre-commit hook, pre-push hook, and the GitHub Action, all via the
-same shared module (filetypes.py / filetypes.sh). Works purely on
+same shared module (filetypes.py). Works purely on
 filenames; file contents are never read.
 
 ## Rules source
@@ -55,7 +55,7 @@ repository at once.
 
 ## Shared module, not duplicated per entry point
 
-filetypes.py / filetypes.sh contain all of the above. The precommit
-and prepush entry scripts (both languages), and the GitHub Action's
+filetypes.py contains all of the above. The precommit and prepush
+entry scripts, and the GitHub Action's
 filetype-check.py, only differ in how they select which files to
 check and in their user-facing messages.

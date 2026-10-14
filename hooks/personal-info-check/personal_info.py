@@ -3,13 +3,6 @@ Shared personal-information detection logic for the pre-commit and
 pre-push hooks. Both hooks import from here so detection rules only
 need to be changed in one place.
 
-Unlike filetype-check, there is no single shared engine underneath
-(no git check-ignore equivalent): this Python module and
-personal-info.sh are two independent reimplementations of the same
-rules, one per language. The bash version is legacy and is not kept at
-feature parity (see .pre-commit-hooks.yaml), so changes made here do
-not have to be mirrored in personal-info.sh, but the two may disagree.
-
 Detection works on a per-line basis: build_patterns() compiles the
 name/street/email regexes once from the reference lists, and
 check_file_for_personal_info() scans each line of a file against

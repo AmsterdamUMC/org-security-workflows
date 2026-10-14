@@ -27,16 +27,14 @@ org-security-workflows/
 │       └── DESIGN.md                        # Design rationale for this action
 ├── hooks/
 │   ├── filetype-check/
-│   │   ├── filetypes.py                     # Shared filetype-matching logic (Python)
-│   │   ├── filetypes.sh                     # Shared filetype-matching logic (bash, legacy)
-│   │   ├── check-filetypes-precommit.py/.sh # Pre-commit hook
-│   │   ├── check-filetypes-prepush.py/.sh   # Pre-push hook
+│   │   ├── filetypes.py                     # Shared filetype-matching logic
+│   │   ├── check-filetypes-precommit.py     # Pre-commit hook
+│   │   ├── check-filetypes-prepush.py       # Pre-push hook
 │   │   └── DESIGN.md                        # Design rationale (matching approach, history)
 │   └── personal-info-check/
-│       ├── personal_info.py                 # Shared PII-matching logic (Python)
-│       ├── personal-info.sh                 # Shared PII-matching logic (bash, legacy)
-│       ├── check-personal-info-precommit.py/.sh # Pre-commit hook
-│       ├── check-personal-info-prepush.py/.sh   # Pre-push hook
+│       ├── personal_info.py                 # Shared PII-matching logic
+│       ├── check-personal-info-precommit.py # Pre-commit hook
+│       ├── check-personal-info-prepush.py   # Pre-push hook
 │       └── DESIGN.md                        # Design rationale (matching approach, history)
 ├── personal-info-lists/
 │   ├── common-dutch-firstnames.txt          # Dutch first name database
@@ -237,7 +235,6 @@ repos:
   - repo: https://github.com/AmsterdamUMC/org-security-workflows
     rev: v0.6.0
     hooks:
-      # Python versions (recommended)
       - id: check-forbidden-filetypes
         stages: [pre-commit]
       - id: check-forbidden-filetypes-prepush
@@ -479,7 +476,6 @@ What's covered, and how:
 - **Pure helper functions** (`test_filetypes.py`, `test_personal_info.py`): small inline unit tests for logic that isn't naturally file-shaped (parsing, false-positive filters).
 - **Hook entry points** (`test_filetypes_hooks.py`, `test_personal_info_hooks.py`): run the real hook scripts as subprocesses against real throwaway git repos, covering both pre-commit (staged files) and pre-push (both its `PRE_COMMIT_FROM_REF`/`TO_REF` and standalone-stdin invocation modes).
 - **GitHub Action entry points** (`test_filetype_check_action.py`, `test_personal_info_check_action.py`): same subprocess approach, scoped to `git ls-files` and asserting on `$GITHUB_OUTPUT` content, since these scripts always exit 0 and signal pass/fail through their output instead.
-- **Bash implementations** (`test_sh_smoke.py`): smoke-tested only (source + run without crashing), not asserted for behavioral parity with the Python versions. They're treated as legacy, a structurally different reimplementation (regex-over-raw-text vs. Python's tokenized n-gram matching), not a like-for-like port, so example-based parity tests could only prove agreement on the sampled cases while immediately hard-coding around known divergences.
 
 Not covered: `actions/gitleaks-check/` has no custom logic (inline bash around a third-party binary), and no test exercises `action.yml` itself, a wiring mistake there (wrong step ID, wrong output key) would only surface in an actual GitHub Actions run.
 

@@ -33,37 +33,3 @@
   stages: [pre-push]
   always_run: true
   pass_filenames: false
-
-# Legacy fallback only, for environments without Python. Not actively
-# kept at feature parity with the Python hooks going forward.
-- id: check-forbidden-filetypes-bash
-  name: Check for forbidden file types (bash)
-  description: Block data files that may contain sensitive information
-  entry: hooks/filetype-check/check-filetypes-precommit.sh
-  language: script
-  types: [file]
-  pass_filenames: true
-
-- id: check-personal-info-bash
-  name: Check for personal information (bash)
-  description: Detect Dutch names, addresses, and email addresses
-  entry: hooks/personal-info-check/check-personal-info-precommit.sh
-  language: script
-  types: [text]
-  pass_filenames: true
-
-- id: check-forbidden-filetypes-prepush-bash
-  name: Check forbidden file types (pre-push, bash)
-  entry: hooks/filetype-check/check-filetypes-prepush.sh
-  language: script
-  stages: [pre-push]
-  always_run: true
-  pass_filenames: false
-
-- id: check-personal-info-prepush-bash
-  name: Check for personal information before push (bash)
-  entry: hooks/personal-info-check/check-personal-info-prepush.sh
-  language: script
-  stages: [pre-push]
-  always_run: true
-  pass_filenames: false
