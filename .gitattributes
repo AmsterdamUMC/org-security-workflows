@@ -1,0 +1,7 @@
+# Hook and action scripts run via their shebang (language: script) from
+# pre-commit's own clone of this repo. On Windows with core.autocrlf=true
+# that clone could otherwise get CRLF line endings, and a trailing \r on the
+# shebang line breaks the script. Keep them LF on every platform.
+*.py   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
